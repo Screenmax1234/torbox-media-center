@@ -19,8 +19,18 @@ services:
   # ── Decypharr ──────────────────────────────────────────────────
   # Mocks qBittorrent API for Radarr/Sonarr, connects to TorBox,
   # handles WebDAV mounting via built-in rclone, and creates symlinks.
+  #
+  # We build a thin local image (Dockerfile.decypharr) on top of the
+  # upstream release.  The only change is an `adduser` for UID 1000 so
+  # that fusermount3 can resolve the username when the container runs as
+  # a non-root user (fixes issue #24 / regression from #23).
   decypharr:
-    image: ghcr.io/sirrobot01/decypharr:v2.0
+    build:
+      context: .
+      dockerfile: Dockerfile.decypharr
+      args:
+        DECYPHARR_VERSION: "v2.4"
+    image: torbox-decypharr:v2.4
     container_name: decypharr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
