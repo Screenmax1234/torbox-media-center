@@ -79,7 +79,7 @@ services:
   # ── Prowlarr ───────────────────────────────────────────────────
   # Indexer manager - feeds search results to Radarr & Sonarr.
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:2.3.5
+    image: lscr.io/linuxserver/prowlarr:2.4.0
     container_name: prowlarr
     restart: unless-stopped
     networks:
@@ -160,7 +160,7 @@ services:
   # Movie management - searches, grabs, and organizes movies.
   # Uses Decypharr as its download client (qBittorrent mock).
   radarr:
-    image: lscr.io/linuxserver/radarr:5.22.4
+    image: lscr.io/linuxserver/radarr:5.27.5
     container_name: radarr
     restart: unless-stopped
     networks:
@@ -205,7 +205,7 @@ services:
   # TV show management - searches, grabs, and organizes series.
   # Uses Decypharr as its download client (qBittorrent mock).
   sonarr:
-    image: lscr.io/linuxserver/sonarr:4.0.14
+    image: lscr.io/linuxserver/sonarr:4.0.15
     container_name: sonarr
     restart: unless-stopped
     networks:
@@ -249,7 +249,7 @@ services:
   # ── Seerr ───────────────────────────────────────────────────────
   # Media request & discovery frontend.
   seerr:
-    image: ghcr.io/seerr-team/seerr:v3.2.0
+    image: ghcr.io/seerr-team/seerr:v3.4.0
     container_name: seerr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped
@@ -292,7 +292,7 @@ services:
   # Media server option 1 - streams your library to any device.
   # Activated via COMPOSE_PROFILES=plex in .env
   plex:
-    image: lscr.io/linuxserver/plex:1.41.5
+    image: lscr.io/linuxserver/plex:1.43.2
     profiles: ["plex"]
     container_name: plex
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -341,7 +341,7 @@ services:
   # Media server option 2 (open-source) - streams your library.
   # Activated via COMPOSE_PROFILES=jellyfin in .env
   jellyfin:
-    image: lscr.io/linuxserver/jellyfin:10.10.7
+    image: lscr.io/linuxserver/jellyfin:10.11.10
     profiles: ["jellyfin"]
     container_name: jellyfin
     user: "${PUID:-1000}:${PGID:-1000}"
