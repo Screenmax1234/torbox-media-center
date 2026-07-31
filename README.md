@@ -186,7 +186,7 @@ User Request                Search & Automation           Cloud Download
 ## Components
 
 | Service | Port | What It Does |
-|---------|------|--------------|
+|---------|------|--------------| 
 | **Decypharr** | 8282 | The bridge between Radarr/Sonarr and TorBox. Pretends to be qBittorrent, mounts TorBox's cloud storage via WebDAV, and creates symlinks (shortcuts) to cloud files. |
 | **Prowlarr** | 9696 | Manages your torrent indexers (search sources). When Radarr/Sonarr need a torrent, Prowlarr searches all your configured sites. |
 | **Byparr** | 8191 | Helps Prowlarr bypass Cloudflare protection on some indexer sites. Works automatically in the background. |
@@ -316,7 +316,7 @@ After setup, follow these steps to verify everything is working:
 Once setup completes, open these URLs in your browser:
 
 | Service | URL | Purpose |
-|---------|-----|---------|
+|---------|-----|---------| 
 | Seerr | http://localhost:5055 | Main request interface |
 | Radarr | http://localhost:7878 | Movie manager |
 | Sonarr | http://localhost:8989 | TV show manager |
@@ -480,6 +480,7 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 - **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys — it's `chmod 600` (owner-read only). Don't commit it to version control
 - **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access — other containers only read files via symlinks
 - **Decypharr config directory is mounted to `/app`** — the entire config directory is bind-mounted (not just config.json) because Decypharr v2.0 needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
+- **Seerr is pinned to v3.4.0+** — v3.4.0 (released 2026-07-28) patches a path traversal vulnerability in the avatar image proxy. If you are running an older Seerr installation, run `./manage.sh update` immediately to pull the patched image
 
 > ⚠️ **Never expose Radarr, Sonarr, Prowlarr, or Decypharr admin UIs to the public internet** without authentication and a reverse proxy with HTTPS. Seerr is designed for this purpose and has its own authentication system.
 
@@ -732,7 +733,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 New to this? Here's what the key terms mean:
 
 | Term | Meaning |
-|------|----------|
+|------|---------|
 | **Debrid** | A cloud downloading service (like TorBox) that downloads torrents for you in the cloud. You stream the files instead of downloading them locally. |
 | **Indexer** | A torrent search site (like 1337x). Prowlarr manages your indexers and searches them when Radarr/Sonarr need content. |
 | **Quality Profile** | A set of rules for what video quality to accept (e.g., "only 1080p or higher"). Used by Radarr/Sonarr when choosing which torrent to grab. |
