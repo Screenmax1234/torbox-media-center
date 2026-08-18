@@ -2,7 +2,7 @@
 
 # 🎬 TorBox Media Server
 
-**A single-command, zero-storage personal streaming setup — powered by TorBox cloud.**
+**A single-command, zero-storage personal streaming setup - powered by TorBox cloud.**
 
 [![ShellCheck](https://github.com/nordicnode/TorBox-Media-Server/actions/workflows/lint.yml/badge.svg)](https://github.com/nordicnode/TorBox-Media-Server/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -14,7 +14,7 @@
 
 > **Your request → TorBox finds & stores → You stream. Zero local storage.**
 
-A single script that installs, configures, and runs a complete debrid-powered media server using Docker. **No media is stored locally** — everything streams from [TorBox](https://torbox.app)'s cloud. Think of it as your own personal Netflix where *you* decide what's available, backed by TorBox's cloud download and cache infrastructure.
+A single script that installs, configures, and runs a complete debrid-powered media server using Docker. **No media is stored locally** - everything streams from [TorBox](https://torbox.app)'s cloud. Think of it as your own personal Netflix where *you* decide what's available, backed by TorBox's cloud download and cache infrastructure.
 
 *Disclaimer: This is an independent open-source project and is not affiliated with or endorsed by TorBox. This project does not condone or allow piracy; users are solely responsible for ensuring they have the legal right to access and stream any content.*
 
@@ -55,7 +55,7 @@ After install, open **Seerr** at `http://YOUR-CASAOS-IP:5055` (replace with your
 cd /DATA/AppData/torbox-media-server && ./manage.sh status
 ```
 
-> Containers run via Docker Compose — they **won't appear as CasaOS app tiles**. Use the URLs above or `manage.sh urls`.
+> Containers run via Docker Compose - they **won't appear as CasaOS app tiles**. Use the URLs above or `manage.sh urls`.
 
 If install failed or nothing is running, re-run the curl command above (it's safe to re-run), or manually:
 
@@ -127,7 +127,7 @@ Run `.\setup.ps1 --help` for all available options.
   Decypharr sends the torrent hash to TorBox via its API
                     │
                     ▼
-  TorBox checks its cache — if someone else already downloaded it,
+  TorBox checks its cache - if someone else already downloaded it,
   it's available INSTANTLY. Otherwise, TorBox downloads it in the cloud.
                     │
                     ▼
@@ -136,20 +136,20 @@ Run `.\setup.ps1 --help` for all available options.
                     │
                     ▼
   Plex or Jellyfin reads these symlinks and streams the content
-  to any device on your network — phone, TV, tablet, computer
+  to any device on your network - phone, TV, tablet, computer
 ```
 
 ### Example: Requesting Your First Movie
 
 1. You open **Seerr** in your browser and search for "Inception"
-2. You click "Request" — Seerr tells Radarr to find it
+2. You click "Request" - Seerr tells Radarr to find it
 3. **Radarr** asks **Prowlarr** to search torrent indexers for the best quality version
 4. Prowlarr finds a 1080p Bluray torrent and sends it back to Radarr
 5. Radarr sends the torrent to **Decypharr** (which looks like qBittorrent to Radarr)
-6. Decypharr sends the torrent hash to **TorBox** — TorBox already has it cached (popular movie!), so it's available **instantly**
+6. Decypharr sends the torrent hash to **TorBox** - TorBox already has it cached (popular movie!), so it's available **instantly**
 7. Decypharr creates a symlink: `/movies/Inception (2010) [imdbid-tt1375666]/Inception (2010) [Bluray-1080p].mkv`
 8. Radarr imports the file and notifies **Plex/Jellyfin**
-9. You open Plex or Jellyfin on your TV and press play — it streams directly from TorBox's cloud
+9. You open Plex or Jellyfin on your TV and press play - it streams directly from TorBox's cloud
 
 The whole process takes **seconds** for cached content (most popular movies/shows).
 
@@ -191,7 +191,7 @@ User Request                Search & Automation           Cloud Download
 | **Prowlarr** | 9696 | Manages your torrent indexers (search sources). When Radarr/Sonarr need a torrent, Prowlarr searches all your configured sites. |
 | **Byparr** | 8191 | Helps Prowlarr bypass Cloudflare protection on some indexer sites. Works automatically in the background. |
 | **Radarr** | 7878 | Movie manager. Searches for movies, picks the best quality torrent, sends it to Decypharr, and organizes your movie library. |
-| **Sonarr** | 8989 | TV show manager. Same as Radarr but for TV series — handles seasons, episodes, and ongoing shows automatically. |
+| **Sonarr** | 8989 | TV show manager. Same as Radarr but for TV series - handles seasons, episodes, and ongoing shows automatically. |
 | **Seerr** | 5055 | Beautiful web UI where you (and your family/friends) can browse and request movies and TV shows. Supports Plex, Jellyfin & Emby. |
 | **Plex** | 32400 | Media server option 1. Streams your library to any device. Requires a free Plex account. |
 | **Jellyfin** | 8096 | Media server option 2 (open-source, no account needed). Streams your library to any device. |
@@ -206,13 +206,13 @@ Before running the setup script, make sure you have everything ready:
 
 ### Required
 
-- [ ] **A Linux or Windows machine** — Designed for Linux (CachyOS/Arch, Ubuntu, etc.) or Windows (using PowerShell + Docker Desktop)
-- [ ] **A TorBox account with a paid plan** — [Sign up at torbox.app](https://torbox.app) (plans start at a few dollars/month)
-- [ ] **Your TorBox API key** — After signing up:
+- [ ] **A Linux or Windows machine** - Designed for Linux (CachyOS/Arch, Ubuntu, etc.) or Windows (using PowerShell + Docker Desktop)
+- [ ] **A TorBox account with a paid plan** - [Sign up at torbox.app](https://torbox.app) (plans start at a few dollars/month)
+- [ ] **Your TorBox API key** - After signing up:
   1. Go to [torbox.app/settings](https://torbox.app/settings)
   2. Scroll to the "API Key" section
   3. Click "Create API Key" or copy your existing one
-  4. Save it somewhere — you'll paste it during setup
+  4. Save it somewhere - you'll paste it during setup
 - [ ] **~30 minutes** for the initial setup (most of it is automated)
 - [ ] **~5–8 GB of bandwidth** for downloading Docker images on the first run
 
@@ -222,7 +222,7 @@ Before running the setup script, make sure you have everything ready:
   1. Go to [plex.tv/claim](https://www.plex.tv/claim/)
   2. Sign in to your Plex account (or create one for free)
   3. Copy the claim token (starts with `claim-`)
-  4. **Use it within 4 minutes** — they expire quickly!
+  4. **Use it within 4 minutes** - they expire quickly!
 
 ### Technical Prerequisites
 
@@ -273,7 +273,7 @@ Then the script automatically:
 
 > **First run takes 5–15 minutes** (mostly downloading Docker images). Subsequent starts take seconds.
 >
-> **Re-running the script** is safe — it detects existing installations, preserves your API keys to avoid breaking integrations, and lets you keep your existing TorBox API key or enter a new one.
+> **Re-running the script** is safe - it detects existing installations, preserves your API keys to avoid breaking integrations, and lets you keep your existing TorBox API key or enter a new one.
 
 ---
 
@@ -341,16 +341,16 @@ Seerr requires a brief one-time wizard:
 
 1. Open **Seerr** (http://localhost:5055)
 2. Click **Get Started**
-3. Sign in with your **Plex account** (if using Plex) — or create a local admin account (if using Jellyfin)
+3. Sign in with your **Plex account** (if using Plex) - or create a local admin account (if using Jellyfin)
 4. On the **Media Server** step:
    - **Plex:** Click **Sync Libraries**, select Movies and TV Shows, click **Continue**
    - **Jellyfin:** Enter `http://jellyfin:8096`, your admin credentials, sync libraries, continue
 5. On the **Services** step:
-   - Radarr should already be listed — click **Test**, then **Save**
-   - Sonarr should already be listed — click **Test**, then **Save**
+   - Radarr should already be listed - click **Test**, then **Save**
+   - Sonarr should already be listed - click **Test**, then **Save**
 6. Click **Finish Setup**
 
-> **If Radarr/Sonarr aren't connected:** Re-run `./setup.sh` — it detects existing installations and re-configures. Or add them manually:
+> **If Radarr/Sonarr aren't connected:** Re-run `./setup.sh` - it detects existing installations and re-configures. Or add them manually:
 > - **Radarr:** Hostname `radarr`, Port `7878`, API key from `./manage.sh keys`, Root Folder `/data/media/movies`
 > - **Sonarr:** Hostname `sonarr`, Port `8989`, API key from `./manage.sh keys`, Root Folder `/data/media/tv`
 
@@ -360,7 +360,7 @@ Seerr requires a brief one-time wizard:
 
 Everything is set up! Let's make sure it all works end-to-end.
 
-1. Open **Seerr** (http://localhost:5055) — or go directly to **Radarr** (http://localhost:7878)
+1. Open **Seerr** (http://localhost:5055) - or go directly to **Radarr** (http://localhost:7878)
 2. Search for a **popular movie** (e.g., "Inception", "The Dark Knight", "Interstellar")
    - Popular movies are almost always already cached on TorBox, so they'll be available instantly
 3. Click **Request** (in Seerr) or **Add Movie** (in Radarr)
@@ -372,7 +372,7 @@ Everything is set up! Let's make sure it all works end-to-end.
 5. Within **seconds to minutes**, the movie should appear in:
    - **Radarr** → Movies (with a green checkmark)
    - **Plex/Jellyfin** → Movies library
-6. Press **play** in Plex/Jellyfin — it should stream smoothly!
+6. Press **play** in Plex/Jellyfin - it should stream smoothly!
 
 🎉 **Congratulations!** Your personal streaming server is fully operational.
 
@@ -408,7 +408,7 @@ cd torbox-media-server/
 ./manage.sh help      # Show all available commands
 ```
 
-> **Auto-start on boot:** The setup script installs a systemd service (`torbox-media-server`) that automatically handles mount propagation and starts all containers when your computer boots. You don't need to do anything — just turn on your computer and everything will be running.
+> **Auto-start on boot:** The setup script installs a systemd service (`torbox-media-server`) that automatically handles mount propagation and starts all containers when your computer boots. You don't need to do anything - just turn on your computer and everything will be running.
 
 ## File Structure
 
@@ -436,16 +436,16 @@ torbox-media-server/
 ```
 
 The project root also contains:
-- `setup.sh` — Linux installation and configuration script
-- `uninstall.sh` — Linux clean removal script (stop containers, remove configs, systemd service)
-- `setup.ps1` — Windows installation and configuration script
-- `uninstall.ps1` — Windows clean removal script (stop containers, remove configs)
+- `setup.sh` - Linux installation and configuration script
+- `uninstall.sh` - Linux clean removal script (stop containers, remove configs, systemd service)
+- `setup.ps1` - Windows installation and configuration script
+- `uninstall.ps1` - Windows clean removal script (stop containers, remove configs)
 
 ---
 
 ## Accessing From Other Devices
 
-By default, all services are bound to `127.0.0.1` (localhost only) — meaning only the computer running the server can access them. To let other devices on your network (phones, TVs, other computers) access your media server:
+By default, all services are bound to `127.0.0.1` (localhost only) - meaning only the computer running the server can access them. To let other devices on your network (phones, TVs, other computers) access your media server:
 
 ### Option 1: Edit Port Bindings (Simple)
 
@@ -463,7 +463,7 @@ ports:
 
 Then restart: `./manage.sh restart`
 
-By default **every** service — including Plex and Jellyfin — is bound to `127.0.0.1` (loopback) only. If you want other devices on your LAN to reach them, you must explicitly relax the binding for the chosen service.
+By default **every** service - including Plex and Jellyfin - is bound to `127.0.0.1` (loopback) only. If you want other devices on your LAN to reach them, you must explicitly relax the binding for the chosen service.
 
 > **Plex note:** To expose Plex on your LAN, change `"127.0.0.1:32400:32400"` to `"32400:32400"` in `docker-compose.yml`, then run `./manage.sh restart`. Plex will then be reachable at `http://YOUR-IP:32400/web`. The same applies to Jellyfin (`8096`) and Seerr (`5055`).
 
@@ -477,10 +477,10 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 
 - **Ports are bound to `127.0.0.1`** by default, preventing LAN/WAN exposure of admin UIs, including Plex and Jellyfin
 - **Authentication is set to `Forms` with `Enabled`** automatically during setup. Secure admin credentials are auto-generated for Radarr, Sonarr, and Prowlarr, ensuring they are protected by default if you choose to expose them to your LAN
-- **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys — it's `chmod 600` (owner-read only). Don't commit it to version control
-- **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access — other containers only read files via symlinks
-- **Decypharr config directory is mounted to `/app`** — the entire config directory is bind-mounted (not just config.json) because Decypharr v2.0 needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
-- **Seerr is pinned to v3.4.0+** — v3.4.0 (released 2026-07-28) patches a path traversal vulnerability in the avatar image proxy. If you are running an older Seerr installation, run `./manage.sh update` immediately to pull the patched image
+- **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys - it's `chmod 600` (owner-read only). Don't commit it to version control
+- **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access - other containers only read files via symlinks
+- **Decypharr config directory is mounted to `/app`** - the entire config directory is bind-mounted (not just config.json) because Decypharr v2.0 needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
+- **Seerr is pinned to v3.4.0+** - v3.4.0 (released 2026-07-28) patches a path traversal vulnerability in the avatar image proxy. If you are running an older Seerr installation, run `./manage.sh update` immediately to pull the patched image
 
 > ⚠️ **Never expose Radarr, Sonarr, Prowlarr, or Decypharr admin UIs to the public internet** without authentication and a reverse proxy with HTTPS. Seerr is designed for this purpose and has its own authentication system.
 
@@ -578,7 +578,7 @@ The setup script installs a systemd service that handles mount propagation autom
 
 This means the API auto-configuration didn't run (e.g., you chose not to start services during setup, or a service wasn't ready in time). You can:
 
-1. **Re-run the setup script** — it detects existing installations, preserves your API keys, and reconfigures
+1. **Re-run the setup script** - it detects existing installations, preserves your API keys, and reconfigures
 2. **Configure manually** in the service's web UI:
 
 | Field | Value |
@@ -615,7 +615,7 @@ For popular movies and TV shows, content is usually available within seconds.
 
 TorBox's API has a limit of 60 requests per hour. If you request a full TV season at once, Sonarr may try to grab many episodes rapidly and exhaust this limit. The setup script configures Decypharr with `rate_limit: "55/hour"` to stay within bounds, but if you see `HTTP error 429: {"detail":"60 per 1 hour"}`:
 
-- Wait an hour for the limit to reset — queued grabs will retry automatically
+- Wait an hour for the limit to reset - queued grabs will retry automatically
 - Avoid requesting multiple full seasons simultaneously
 - Check your Decypharr config (`configs/decypharr/config.json`) and ensure `rate_limit` is set to `"55/hour"` or lower
 
@@ -660,7 +660,7 @@ On the first run, Docker pulls all container images (~5–8 GB total) which can 
 This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute and refresh. If the problem persists:
 1. Go to **Settings → Apps**
 2. Click the problematic app (Radarr or Sonarr)
-3. Click **Test** — if it fails, verify the URL and API key are correct
+3. Click **Test** - if it fails, verify the URL and API key are correct
 4. The internal URLs should be `http://radarr:7878` and `http://sonarr:8989`
 
 ### CasaOS: install seemed to work but nothing runs
@@ -670,22 +670,22 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
    cd /DATA/AppData/torbox-media-server && ./manage.sh status
    docker ps
    ```
-2. **If `manage.sh` is missing**, setup never finished — re-run with your API key:
+2. **If `manage.sh` is missing**, setup never finished - re-run with your API key:
    ```bash
    curl -fsSL https://raw.githubusercontent.com/nordicnode/TorBox-Media-Server/main/install-casaos.sh | TORBOX_API_KEY=*** bash
    ```
-3. **Open services by IP, not localhost** — from another device use `http://YOUR-CASAOS-IP:5055` (Seerr), not `localhost`.
+3. **Open services by IP, not localhost** - from another device use `http://YOUR-CASAOS-IP:5055` (Seerr), not `localhost`.
 4. **View logs** if a container keeps restarting:
    ```bash
    cd /DATA/AppData/torbox-media-server && ./manage.sh logs decypharr
    ```
-5. **`.env` parse error with `\x1b`** — older setup wrote log lines into `.env`. Fix in place:
+5. **`.env` parse error with `\x1b`** - older setup wrote log lines into `.env`. Fix in place:
    ```bash
    grep -v $'\x1b' /DATA/AppData/torbox-media-server/.env > /tmp/torbox.env && mv /tmp/torbox.env /DATA/AppData/torbox-media-server/.env
    cd /DATA/AppData/torbox-media-server && ./manage.sh restart
    ```
    Or re-run the curl installer (it auto-repairs `.env` now).
-6. **Radarr/Sonarr unhealthy on first start** — common on slower CasaOS boxes (DB migration can take several minutes):
+6. **Radarr/Sonarr unhealthy on first start** - common on slower CasaOS boxes (DB migration can take several minutes):
    ```bash
    sudo chown -R 1000:1000 /DATA/AppData/torbox-media-server/configs /DATA/AppData/torbox-media-server/data
    sudo mkdir -p /DATA/Media/torbox-media
@@ -698,7 +698,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
    cd /DATA/AppData/torbox-media-server && sudo ./manage.sh restart
    ```
    Wait 3–5 minutes on first boot before checking `docker ps` again.
-7. **Radarr/Sonarr password from `.env` does not work** — passwords are written to `.env` at install time but only applied to the apps when auto-config runs. If containers were unhealthy during setup, sync them:
+7. **Radarr/Sonarr password from `.env` does not work** - passwords are written to `.env` at install time but only applied to the apps when auto-config runs. If containers were unhealthy during setup, sync them:
    ```bash
    cd /DATA/AppData/torbox-media-server-src && git pull
    TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server ./setup.sh --sync-auth
@@ -709,22 +709,22 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 
 ## Design Decisions
 
-- **Seerr** instead of Overseerr — Overseerr was archived in 2024; Seerr is the merged successor supporting Plex, Jellyfin, and Emby
-- **Byparr** instead of FlareSolverr — FlareSolverr is currently non-functional (Cloudflare detects it); Byparr is a drop-in replacement using the same API
-- **Only Decypharr gets FUSE/SYS_ADMIN** — Plex/Jellyfin/Radarr/Sonarr only read files, they don't need elevated privileges
-- **Plex on bridge networking** — Plex runs on the same Docker bridge network as all other services, allowing Seerr to connect via container name (`http://plex:32400`). Host networking was avoided because many Linux firewalls (UFW, firewalld) block traffic from Docker bridge containers to the host, causing Seerr ↔ Plex connectivity failures
-- **Plex notifications on Radarr/Sonarr** — triggers an instant Plex library scan when content is imported, upgraded, or deleted, so new media appears in seconds instead of waiting for Plex's periodic scan interval
-- **Ports bound to localhost** — prevents accidental LAN/WAN exposure of admin UIs, including Plex and Jellyfin
-- **Mount propagation** — uses `rshared` on Decypharr (the mount source) and `rslave` on media servers (consumers); a systemd service (`torbox-media-server`) handles this automatically on boot, and `manage.sh` re-applies it as a safety net
-- **Hardlinks disabled** — debrid setups use symlinks from Decypharr's WebDAV mount, not local files; hardlinks would fail
-- **Systemd auto-start** — a `torbox-media-server.service` unit handles mount propagation and container startup on boot, so users never have to manually start services after a reboot
-- **Auto-configured Auth** — the setup script pre-seeds `Forms` auth with `DisabledForLocalAddresses` on first boot (so users can reach the UI even if auto-config fails), then uses the API key to programmatically set admin credentials. A `--sync-auth` flag and `manage.sh reset-auth` command provide manual credential sync
-- **Pre-seeded API keys** — generated during setup and injected into config.xml before containers start, enabling fully automated API-based configuration
-- **jq for JSON manipulation** — used to modify *arr config via API; auto-installed as a dependency
-- **Quality profile upgrades enabled** — without this, Radarr/Sonarr won't replace a 720p version with a 1080p one; most users want automatic upgrades
-- **Docker images pinned to specific versions** — image tags are pinned in `docker-compose.yml` to avoid breakage from upstream changes; run `git pull` then re-run `./setup.sh` (Linux) or `.\setup.ps1` (Windows) to pick up newer versions intentionally
-- **Decypharr config directory mounted to `/app`** — the entire `configs/decypharr/` directory is bind-mounted to `/app` (not just `config.json`) because Decypharr v2.0 attempts to `chown` the `/app` directory contents on startup; a file-level bind mount causes "Operation not permitted" errors and crash-loops
-- **Decypharr credentials pre-seeded** — generated during setup and injected into config.json, eliminating manual credential creation
+- **Seerr** instead of Overseerr - Overseerr was archived in 2024; Seerr is the merged successor supporting Plex, Jellyfin, and Emby
+- **Byparr** instead of FlareSolverr - FlareSolverr is currently non-functional (Cloudflare detects it); Byparr is a drop-in replacement using the same API
+- **Only Decypharr gets FUSE/SYS_ADMIN** - Plex/Jellyfin/Radarr/Sonarr only read files, they don't need elevated privileges
+- **Plex on bridge networking** - Plex runs on the same Docker bridge network as all other services, allowing Seerr to connect via container name (`http://plex:32400`). Host networking was avoided because many Linux firewalls (UFW, firewalld) block traffic from Docker bridge containers to the host, causing Seerr ↔ Plex connectivity failures
+- **Plex notifications on Radarr/Sonarr** - triggers an instant Plex library scan when content is imported, upgraded, or deleted, so new media appears in seconds instead of waiting for Plex's periodic scan interval
+- **Ports bound to localhost** - prevents accidental LAN/WAN exposure of admin UIs, including Plex and Jellyfin
+- **Mount propagation** - uses `rshared` on Decypharr (the mount source) and `rslave` on media servers (consumers); a systemd service (`torbox-media-server`) handles this automatically on boot, and `manage.sh` re-applies it as a safety net
+- **Hardlinks disabled** - debrid setups use symlinks from Decypharr's WebDAV mount, not local files; hardlinks would fail
+- **Systemd auto-start** - a `torbox-media-server.service` unit handles mount propagation and container startup on boot, so users never have to manually start services after a reboot
+- **Auto-configured Auth** - the setup script pre-seeds `Forms` auth with `DisabledForLocalAddresses` on first boot (so users can reach the UI even if auto-config fails), then uses the API key to programmatically set admin credentials. A `--sync-auth` flag and `manage.sh reset-auth` command provide manual credential sync
+- **Pre-seeded API keys** - generated during setup and injected into config.xml before containers start, enabling fully automated API-based configuration
+- **jq for JSON manipulation** - used to modify *arr config via API; auto-installed as a dependency
+- **Quality profile upgrades enabled** - without this, Radarr/Sonarr won't replace a 720p version with a 1080p one; most users want automatic upgrades
+- **Docker images pinned to specific versions** - image tags are pinned in `docker-compose.yml` to avoid breakage from upstream changes; run `git pull` then re-run `./setup.sh` (Linux) or `.\setup.ps1` (Windows) to pick up newer versions intentionally
+- **Decypharr config directory mounted to `/app`** - the entire `configs/decypharr/` directory is bind-mounted to `/app` (not just `config.json`) because Decypharr v2.0 attempts to `chown` the `/app` directory contents on startup; a file-level bind mount causes "Operation not permitted" errors and crash-loops
+- **Decypharr credentials pre-seeded** - generated during setup and injected into config.json, eliminating manual credential creation
 
 ---
 
@@ -741,7 +741,7 @@ New to this? Here's what the key terms mean:
 | **Symlink** | A "shortcut" file that points to another file. Decypharr creates symlinks that point to TorBox's cloud-mounted files, so Plex/Jellyfin can find them. |
 | **Hardlink** | A direct reference to file data on the same filesystem. Doesn't work with cloud mounts, which is why the setup disables them. |
 | **WebDAV** | A protocol for accessing remote files over the internet, like a network drive. TorBox exposes your downloaded files via WebDAV. |
-| **FUSE** | "Filesystem in Userspace" — lets rclone mount TorBox's WebDAV as if it were a local drive. |
+| **FUSE** | "Filesystem in Userspace" - lets rclone mount TorBox's WebDAV as if it were a local drive. |
 | **Mount Propagation** | A Linux kernel feature that lets one container's mounted drives be visible to other containers. Needed so Plex/Jellyfin can see Decypharr's WebDAV mount. |
 | **rclone** | A tool that mounts cloud storage (like TorBox's WebDAV) as a local filesystem. Built into Decypharr. |
 | **Claim Token** | A one-time code from Plex that links a new Plex server to your Plex account. Expires after 4 minutes. |
@@ -758,4 +758,4 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT - see [LICENSE](LICENSE) for details.
