@@ -695,6 +695,24 @@ http://plex:32400
 ```
 If this doesn't work, check that both containers are running (`./manage.sh status`) and on the same network (`docker network inspect torbox-media-server_media-network`).
 
+### Plex only sees new media after a manual scan
+
+Changes inside a remote FUSE mount may not generate the local filesystem events Plex watches. Radarr and Sonarr should notify Plex **after importing** each completed movie or episode. Completion in TorBox alone does not mean the import has finished.
+
+Older installs could skip Plex notifications if Plex was not yet claimed during setup, or keep an existing connection with a stale token or disabled library updates. After claiming Plex, repair the connections from your source checkout:
+
+```bash
+cd /path/to/torbox-media-center
+git pull --ff-only
+bash repair-plex.sh
+```
+
+This tests both *arr → Plex connections before saving, creates missing connections, and refreshes existing connections targeting `plex`. It enables import, upgrade and rename events plus **Update Library**, and backs up the original notification settings privately under the install directory. Custom Plex hosts are reported for manual review. No container restart or TorBox configuration change is needed. Scan the library manually once for items that were imported before the repair.
+
+For manual configuration, open **Settings → Connect → Plex Media Server** in both Radarr and Sonarr. Set host `plex`, port `32400`, enable **On Import** (called **On Download** in some versions), **On Upgrade**, and **Update Library**, authenticate with Plex, then **Test** and **Save**. Both applications and Plex share the same `/data` paths, so new connections do not need remote path mappings.
+
+In Plex **Settings → Library**, automatic scans and periodic scans can be enabled as a fallback. Import notifications request a scan; scanning and metadata matching still take time. A successful **Test** verifies the connection, while a new completed import verifies the actual scan trigger.
+
 ### How do I find my API keys?
 
 `./manage.sh keys` shows masked values. Use `./manage.sh keys --show-secrets`
@@ -784,7 +802,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 - **Byparr** instead of FlareSolverr - FlareSolverr is currently non-functional (Cloudflare detects it); Byparr is a drop-in replacement using the same API
 - **Only Decypharr gets FUSE/SYS_ADMIN** - Plex/Jellyfin/Radarr/Sonarr only read files, they don't need elevated privileges
 - **Plex on bridge networking** - Plex runs on the same Docker bridge network as all other services, allowing Seerr to connect via container name (`http://plex:32400`). Host networking was avoided because many Linux firewalls (UFW, firewalld) block traffic from Docker bridge containers to the host, causing Seerr ↔ Plex connectivity failures
-- **Plex notifications on Radarr/Sonarr** - triggers an instant Plex library scan when content is imported, upgraded, or deleted, so new media appears in seconds instead of waiting for Plex's periodic scan interval
+- **Plex notifications on Radarr/Sonarr** - requests a Plex library scan when content is imported, upgraded, renamed or deleted, avoiding reliance on file watching through the remote mount. Scanning and metadata matching can still take time
 - **LAN-accessible port bindings** - make the stack behave like a normal Docker deployment; use firewall rules and reverse proxy authentication before allowing internet access
 - **Mount propagation** - uses `rshared` on Decypharr (the mount source) and `rslave` on media servers (consumers); a systemd service (`torbox-media-server`) handles this automatically on boot, and `manage.sh` re-applies it as a safety net
 - **Hardlinks disabled** - debrid setups use symlinks from Decypharr's WebDAV mount, not local files; hardlinks would fail

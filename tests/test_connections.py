@@ -49,6 +49,13 @@ class ConnectionTests(unittest.TestCase):
         self.root_folders = [{"id": 1, "path": "/data/media/movies"}]
         self.writes = []
         self.tests = []
+        self.notifications = []
+        self.notification_writes = []
+        self.notification_tests = []
+        self.plex_schema = [{"implementation": "PlexServer", "configContract": "PlexServerSettings",
+                             "name": "", "fields": [{"name": name, "value": value} for name, value in
+                             [("host", ""), ("port", 32400), ("useSsl", False),
+                              ("authToken", ""), ("updateLibrary", False), ("mapFrom", "")]]}]
         self.owner = self
 
         owner = self
@@ -69,6 +76,20 @@ class ConnectionTests(unittest.TestCase):
                     service = path.split("/")[1]
                     if self.headers.get("X-Api-Key") != service + "-live-key":
                         status = 401
+                    elif "/notification" in path:
+                        if path.endswith("/schema"):
+                            response = owner.plex_schema
+                        elif path.endswith("/test"):
+                            owner.notification_tests.append(payload)
+                            if owner.reject_test:
+                                status = 400
+                        elif self.command == "GET":
+                            response = owner.notifications
+                        elif owner.reject_save:
+                            status = 500
+                        else:
+                            owner.notification_writes.append((self.command, path, payload))
+                            owner.notifications = [dict(payload, id=17)]
                     elif path.endswith("/config/host"):
                         response = {"proxyEnabled": True, "proxyPort": 8191}
                 elif path == "/api/v1/settings/public":
@@ -120,7 +141,7 @@ class ConnectionTests(unittest.TestCase):
                    CONFIG_DIR=shell_path(self.config), TEST_URL=self.url, **extra_env)
         result = subprocess.run([BASH, "-c", script], env=env, capture_output=True,
                                 text=True, timeout=30)
-        for secret in ("seerr-secret", "sonarr-live-key", "stale-secret"):
+        for secret in ("seerr-secret", "sonarr-live-key", "stale-secret", "plex-secret"):
             self.assertNotIn(secret, result.stdout + result.stderr)
         return result
 
@@ -192,7 +213,85 @@ class ConnectionTests(unittest.TestCase):
         self.assertNotEqual(self.sync("radarr").returncode, 0)
         self.assertEqual(self.writes, [])
 
-    def test_full_diagnostic_and_legacy_rate_migration(self):
+    def sync_plex(self, service="radarr", claimed=True):
+        prefs = self.config / "plex/Library/Application Support/Plex Media Server/Preferences.xml"
+        prefs.parent.mkdir(parents=True, exist_ok=True)
+        prefs.write_text('<Preferences PlexOnlineToken="plex-secret" />' if claimed
+                         else '<Preferences />', encoding="utf-8")
+        return self.run_bash(
+            'set -euo pipefail; source "$PROJECT_ROOT/lib/plex.sh"; '
+            f'plex_sync_notification {service.title()} "$TEST_URL/{service}" '
+            f'{service}-live-key "$CONFIG_DIR"'
+        )
+
+    def test_plex_missing_connection_created_for_each_arr(self):
+        for service in ("radarr", "sonarr"):
+            self.notifications = []
+            result = self.sync_plex(service)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            saved = self.notification_writes[-1][2]
+            self.assertTrue(saved["onDownload"])
+            self.assertTrue(saved["onUpgrade"])
+            self.assertTrue(saved["onRename"])
+            self.assertTrue(saved["onMovieFileDelete" if service == "radarr" else "onEpisodeFileDelete"])
+            fields = {f["name"]: f["value"] for f in saved["fields"]}
+            self.assertEqual(fields["host"], "plex")
+            self.assertEqual(fields["port"], 32400)
+            self.assertEqual(fields["authToken"], "plex-secret")
+            self.assertTrue(fields["updateLibrary"])
+
+    def test_plex_existing_connection_refreshed_without_duplicate(self):
+        original = dict(copy.deepcopy(self.plex_schema[0]), id=17, name="My Plex", tags=[3], onDownload=False)
+        for field in original["fields"]:
+            if field["name"] == "host":
+                field["value"] = "plex"
+            elif field["name"] == "authToken":
+                field["value"] = "stale-secret"
+            elif field["name"] == "mapFrom":
+                field["value"] = "/custom"
+        self.notifications = [original]
+        result = self.sync_plex()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.notification_writes[0][:2], ("PUT", "/radarr/api/v3/notification/17"))
+        self.assertEqual(len(self.notifications), 1)
+        self.assertEqual(self.notifications[0]["tags"], [3])
+        self.assertEqual(self.notifications[0]["name"], "My Plex")
+        self.assertIn({"name": "mapFrom", "value": "/custom"}, self.notifications[0]["fields"])
+
+    def test_plex_failed_test_never_saves(self):
+        self.reject_test = True
+        self.assertNotEqual(self.sync_plex().returncode, 0)
+        self.assertEqual(self.notification_writes, [])
+
+    def test_plex_unclaimed_server_never_saves(self):
+        self.assertNotEqual(self.sync_plex(claimed=False).returncode, 0)
+        self.assertEqual(self.notification_tests, [])
+        self.assertEqual(self.notification_writes, [])
+
+    def test_plex_custom_host_is_preserved(self):
+        record = copy.deepcopy(self.plex_schema[0])
+        record["fields"][0]["value"] = "other-plex"
+        self.notifications = [record]
+        self.assertNotEqual(self.sync_plex().returncode, 0)
+        self.assertEqual(self.notifications, [record])
+        self.assertEqual(self.notification_writes, [])
+
+    def test_plex_failed_save_is_reported(self):
+        self.reject_save = True
+        self.assertNotEqual(self.sync_plex().returncode, 0)
+
+    def test_plex_notification_backup(self):
+        prefs = self.config / "plex/Library/Application Support/Plex Media Server/Preferences.xml"
+        prefs.parent.mkdir(parents=True)
+        prefs.write_text('<Preferences PlexOnlineToken="plex-secret" />', encoding="utf-8")
+        result = self.run_bash(
+            'set -euo pipefail; source "$PROJECT_ROOT/lib/plex.sh"; '
+            'plex_sync_notification Radarr "$TEST_URL/radarr" radarr-live-key "$CONFIG_DIR" "$CONFIG_DIR"'
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.config / "radarr-notifications.json").read_text()), [])
+
+    def mock_install(self):
         env_lines = []
         for service in ("radarr", "sonarr", "prowlarr"):
             (self.config / service).mkdir()
@@ -201,11 +300,6 @@ class ConnectionTests(unittest.TestCase):
             )
             env_lines.append(f"{service.upper()}_API_KEY={service}-live-key")
         (self.install / ".env").write_text("\n".join(env_lines), encoding="utf-8")
-        (self.config / "decypharr").mkdir()
-        config_path = self.config / "decypharr/config.json"
-        config_path.write_text(json.dumps({"debrids": [
-            {"name": "torbox", "rate_limit": "55/hour", "api_key": "preserve-me"},
-            {"name": "other", "rate_limit": "55/hour"}]}), encoding="utf-8")
         # Route fixed localhost service URLs to the mock; use real curl otherwise.
         shim = Path(self.temp.name) / "bin"
         shim.mkdir()
@@ -224,6 +318,37 @@ class ConnectionTests(unittest.TestCase):
         (shim / "curl").chmod(0o755)
         env = {"TEST_SHIM": shell_path(shim),
                "TORBOX_INSTALL_DIR": shell_path(self.install)}
+        return env
+
+    def test_repair_plex_command_preserves_download_configuration(self):
+        env = self.mock_install()
+        prefs = self.config / "plex/Library/Application Support/Plex Media Server/Preferences.xml"
+        prefs.parent.mkdir(parents=True)
+        prefs.write_text('<Preferences PlexOnlineToken="plex-secret" />', encoding="utf-8")
+        (self.config / "decypharr").mkdir()
+        download_config = self.config / "decypharr/config.json"
+        download_config.write_text('{"debrids":[{"name":"torbox"}]}', encoding="utf-8")
+        original_config = download_config.read_bytes()
+        original_env = (self.install / ".env").read_bytes()
+        result = self.run_bash(
+            'export PATH="$TEST_SHIM:$PATH"; bash "$PROJECT_ROOT/repair-plex.sh"', **env
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.notification_writes), 2)
+        self.assertEqual(download_config.read_bytes(), original_config)
+        self.assertEqual((self.install / ".env").read_bytes(), original_env)
+        backups = list(self.install.glob("connection-backup-*/*-notifications.json"))
+        self.assertEqual(len(backups), 2)
+        if os.name != "nt":
+            self.assertTrue(all(p.stat().st_mode & 0o077 == 0 for p in backups))
+
+    def test_full_diagnostic_and_legacy_rate_migration(self):
+        env = self.mock_install()
+        (self.config / "decypharr").mkdir()
+        config_path = self.config / "decypharr/config.json"
+        config_path.write_text(json.dumps({"debrids": [
+            {"name": "torbox", "rate_limit": "55/hour", "api_key": "preserve-me"},
+            {"name": "other", "rate_limit": "55/hour"}]}), encoding="utf-8")
         diagnostic = 'export PATH="$TEST_SHIM:$PATH"; bash "$PROJECT_ROOT/diagnose-connections.sh"'
         original = config_path.read_bytes()
         check = self.run_bash(diagnostic, **env)

@@ -84,6 +84,7 @@ SETUP_COMPLETE_FILE="${INSTALL_DIR}/.setup_complete"
 # Source shared environment parsing library
 source "${SCRIPT_DIR}/lib/env.sh"
 source "${SCRIPT_DIR}/lib/seerr.sh"
+source "${SCRIPT_DIR}/lib/plex.sh"
 
 # Docker image versions are pinned directly in docker-compose.yml.
 
@@ -2042,53 +2043,6 @@ DCJSON_EOF
             log_info "  Quality profiles updated (upgrades enabled)." ||
             log_warn "  Failed to update quality profiles."
     fi
-
-    # Add Plex notification so library updates happen immediately on import
-    if [[ "${MEDIA_SERVER}" == "plex" ]]; then
-        local existing_notifs
-        existing_notifs=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" "${url}/api/v3/notification" 2>/dev/null) || true
-        if ! echo "$existing_notifs" | grep -q '"implementation":"PlexServer"' 2>/dev/null && ! echo "$existing_notifs" | grep -q '"implementation": "PlexServer"' 2>/dev/null; then
-            local plex_token=""
-            local plex_prefs="${CONFIG_DIR}/plex/Library/Application Support/Plex Media Server/Preferences.xml"
-            if [[ -f "$plex_prefs" ]]; then
-                plex_token=$(sed -n 's/.*PlexOnlineToken="\([^"][^"]*\)".*/\1/p' "$plex_prefs" 2>/dev/null) || true
-            fi
-            if [[ -n "$plex_token" ]]; then
-                local on_download_field="onDownload" on_upgrade_field="onUpgrade"
-                local on_delete_field="onMovieFileDelete" on_delete_upgrade_field="onMovieFileDeleteForUpgrade"
-                local on_rename_field="onRename"
-                if [[ "$name" == "Sonarr" ]]; then
-                    on_delete_field="onEpisodeFileDelete"
-                    on_delete_upgrade_field="onEpisodeFileDeleteForUpgrade"
-                fi
-                curl -sf --connect-timeout 5 --max-time 15 -X POST -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" \
-                    "${url}/api/v3/notification" \
-                    -d @- -o /dev/null <<EOF && log_info "  Plex notification added to ${name} (instant library updates)." || log_warn "  Failed to add Plex notification to ${name}."
-                    {
-                        "name": "Plex",
-                        "implementation": "PlexServer",
-                        "configContract": "PlexServerSettings",
-                        "${on_download_field}": true,
-                        "${on_upgrade_field}": true,
-                        "${on_rename_field}": true,
-                        "${on_delete_field}": true,
-                        "${on_delete_upgrade_field}": true,
-                        "fields": [
-                            {"name": "host", "value": "plex"},
-                            {"name": "port", "value": 32400},
-                            {"name": "useSsl", "value": false},
-                            {"name": "authToken", "value": "${plex_token}"},
-                            {"name": "updateLibrary", "value": true}
-                        ]
-                    }
-EOF
-            else
-                log_warn "  Plex token not found — skipping Plex notification for ${name}. You can add it manually in ${name} → Settings → Connect."
-            fi
-        else
-            log_info "  ${name} already has Plex notification configured."
-        fi
-    fi
 }
 
 # Helper: GET a *arr config section, modify fields with jq, PUT it back
@@ -2294,7 +2248,20 @@ configure_arrs() {
 
     configure_seerr || _failed=$((_failed + 1))
 
-    configure_plex_libraries || _failed=$((_failed + 1))
+    # Wait for Plex to be claimed before configuring its import notifications.
+    # Re-test and refresh existing connections too, including stale tokens.
+    if configure_plex_libraries; then
+        if [[ "$MEDIA_SERVER" == plex ]]; then
+            if [[ "$radarr_ready" == true ]]; then
+                plex_sync_notification Radarr "$radarr_url" "$RADARR_API_KEY" "$CONFIG_DIR" || _failed=$((_failed + 1))
+            fi
+            if [[ "$sonarr_ready" == true ]]; then
+                plex_sync_notification Sonarr "$sonarr_url" "$SONARR_API_KEY" "$CONFIG_DIR" || _failed=$((_failed + 1))
+            fi
+        fi
+    else
+        _failed=$((_failed + 1))
+    fi
 
     if [[ "$prowlarr_ready" == "true" ]]; then
         add_default_indexer || _failed=$((_failed + 1))
