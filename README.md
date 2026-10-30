@@ -52,6 +52,8 @@ Dockerfile into the install directory, builds it during startup, and excludes
 it from remote image pulls. If Docker reports `pull access denied for
 torbox-decypharr`, run the repair command above. It preserves `.env`, service
 configuration, and media data while refreshing only the deployment files.
+If setup is run as root and generates `PUID=0`, the Decypharr image reuses the
+existing root account instead of trying to create another UID 0 user.
 
 Run `./setup-fixed.sh --help` for all available options.
 

@@ -179,6 +179,16 @@ else
     fail "Decypharr still references a registry-style local image tag"
 fi
 
+# 2.10 Root installs use PUID=0. The Dockerfile must skip creating a duplicate
+# UID 0 account instead of failing with "uid '0' in use".
+if grep -q 'APP_UID.*=.*"0"' "$COMPOSE_FILE" 2>/dev/null ||
+    grep -q 'APP_UID.*0' "$PROJECT_ROOT/Dockerfile.decypharr" &&
+    grep -q 'already exists' "$PROJECT_ROOT/Dockerfile.decypharr"; then
+    pass "Decypharr Dockerfile handles existing runtime UIDs"
+else
+    fail "Decypharr Dockerfile may fail when PUID already exists (including 0)"
+fi
+
 # ============================================================================
 #  3. SETUP.SH STRUCTURAL TESTS
 # ============================================================================

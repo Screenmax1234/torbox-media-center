@@ -19,7 +19,15 @@ ARG APP_UID=1000
 
 # adduser flags:
 #   -u APP_UID  match the PUID used at runtime
-#   -D        no password (daemon account)
-#   -H        do not create a home directory
+#   -D          no password (daemon account)
+#   -H          do not create a home directory
 #   -s /bin/sh  minimal shell (required by some FUSE helpers)
-RUN adduser -u "${APP_UID}" -D -H -s /bin/sh appuser
+#
+# Root installs commonly generate PUID=0. UID 0 already exists as root, so
+# attempting `adduser -u 0` fails the image build. The same guard also avoids
+# collisions for any other UID already present in the upstream image.
+RUN if [ "${APP_UID}" = "0" ] || awk -F: -v uid="${APP_UID}" '$3 == uid { found=1 } END { exit(found ? 0 : 1) }' /etc/passwd; then \
+        echo "UID ${APP_UID} already exists; skipping appuser creation"; \
+    else \
+        adduser -u "${APP_UID}" -D -H -s /bin/sh appuser; \
+    fi
