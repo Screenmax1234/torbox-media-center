@@ -28,7 +28,7 @@ jobs:
           shfmt --version
 
       - name: Check formatting
-        run: shfmt -d -i 4 -ci setup.sh uninstall.sh tests/
+        run: shfmt -d -i 4 -ci setup.sh uninstall.sh diagnose-connections.sh lib/ tests/
 
   shellcheck:
     name: ShellCheck
@@ -47,6 +47,9 @@ jobs:
 
       - name: Lint tests
         run: shellcheck tests/*.sh
+
+      - name: Lint connection diagnostics
+        run: shellcheck diagnose-connections.sh lib/seerr.sh
 
   powershell-lint:
     name: PowerShell Lint
@@ -117,6 +120,9 @@ jobs:
 
       - name: Test generated management commands
         run: bash tests/test_manage_keys.sh
+
+      - name: Test authenticated service connections and repair
+        run: python3 tests/test_connections.py
 
       - name: Extract and validate manage.sh
         run: |

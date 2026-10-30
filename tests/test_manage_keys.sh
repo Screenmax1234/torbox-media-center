@@ -34,7 +34,7 @@ revealed=$(bash "$install_dir/manage.sh" keys --show-secrets)
 grep -q 'Secrets masked' <<<"$masked"
 while IFS='=' read -r name value; do
     case "$name" in
-        *_KEY|*_PASS)
+        *_KEY | *_PASS)
             if grep -Fq "$value" <<<"$masked"; then
                 echo "FAIL: keys exposed $name without --show-secrets" >&2
                 exit 1

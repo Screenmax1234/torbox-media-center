@@ -10,6 +10,8 @@ torbox-media-server/
 # Backups (created by manage.sh `backup` and uninstall scripts)
 backups/
 torbox_backup_*/
+connection-backup-*/
+*.before-rate-fix-*
 *.bak
 *.bak.*
 

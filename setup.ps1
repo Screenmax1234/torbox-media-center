@@ -495,7 +495,7 @@ function Invoke-GenerateDecypharrConfig {
       "name": "torbox",
       "api_key": "$($global:TorboxApiKey)",
       "folder": "/mnt/remote/torbox/__all__",
-      "rate_limit": "55/hour",
+      "rate_limit": "250/minute",
       "use_webdav": true
     }
   ],

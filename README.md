@@ -643,11 +643,35 @@ For popular movies and TV shows, content is usually available within seconds.
 
 ### TorBox rate limit errors (429)
 
-TorBox's API has a limit of 60 requests per hour. If you request a full TV season at once, Sonarr may try to grab many episodes rapidly and exhaust this limit. The setup script configures Decypharr with `rate_limit: "55/hour"` to stay within bounds, but if you see `HTTP error 429: {"detail":"60 per 1 hour"}`:
+TorBox's [API documentation](https://api-docs.torbox.app) lists a general limit of **300 requests/minute**. Creating **uncached torrents** has a separate **60/hour** limit; cached torrent creation allows 300/minute. This installer uses Decypharr's upstream default of `rate_limit: "250/minute"`. It does not bypass the uncached-creation limit.
 
-- Wait an hour for the limit to reset - queued grabs will retry automatically
+- Wait for the provider's limit to reset before retrying failed requests
 - Avoid requesting multiple full seasons simultaneously
-- Check your Decypharr config (`configs/decypharr/config.json`) and ensure `rate_limit` is set to `"55/hour"` or lower
+- Older installs used `"55/hour"` for **all** API calls, causing roughly 65 seconds of waiting per call, slow initial sync and possible Radarr/Sonarr submission timeouts. Use the connection repair below to migrate that exact legacy value. Custom rate limits are preserved.
+
+### Check or repair service connections (Linux)
+
+From your source checkout, run:
+
+```bash
+cd /path/to/torbox-media-center
+git pull --ff-only
+bash diagnose-connections.sh
+```
+
+The diagnostic checks live Radarr/Sonarr/Prowlarr API authentication, compares stored keys without displaying them, checks Prowlarr's global proxy, and tests Sonarr/Radarr **from Seerr's network**. Complete Seerr's setup wizard first. It also checks Decypharr's web endpoint; this is not an end-to-end download test.
+
+To refresh Seerr's stale keys or add missing default Sonarr/Radarr connections and migrate the legacy TorBox rate limit:
+
+```bash
+bash diagnose-connections.sh --repair
+cd torbox-media-server
+docker compose restart decypharr
+```
+
+The repair uses a key accepted by each live *arr API, authenticates to Seerr with its saved API key, and tests connections before saving. Existing profiles, folders, hostnames and other options are preserved. API settings backups are stored privately under the install directory; the Decypharr JSON is backed up beside the original before migration. No torrents are submitted, keys rotated or containers restarted by the diagnostic itself. A nonzero exit means checks still need attention; successful individual repairs may already have been saved. For a custom install, set `TORBOX_INSTALL_DIR=/path/to/install` when running the diagnostic.
+
+If Prowlarr reports proxy errors involving port **8191**, disable **Settings → General → Proxy**. Add Byparr under **Indexers → Indexer Proxies → FlareSolverr**, using `http://byparr:8191`. Byparr is not an HTTP/SOCKS proxy. The diagnostic reports this mistake without changing your proxy settings.
 
 ### Byparr not solving Cloudflare challenges
 

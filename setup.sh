@@ -83,6 +83,7 @@ SETUP_COMPLETE_FILE="${INSTALL_DIR}/.setup_complete"
 
 # Source shared environment parsing library
 source "${SCRIPT_DIR}/lib/env.sh"
+source "${SCRIPT_DIR}/lib/seerr.sh"
 
 # Docker image versions are pinned directly in docker-compose.yml.
 
@@ -1062,7 +1063,8 @@ generate_decypharr_config() {
                 --arg pass "${DECYPHARR_PASS:-}" \
                 '(.debrids[0] // {}).api_key = $key
                    | if $pass != "" then .password = $pass else . end
-                   | .username = $user' \
+                   | .username = $user
+                   | (.debrids[]? | select(.name == "torbox" and .rate_limit == "55/hour")).rate_limit = "250/minute"' \
                 "${CONFIG_DIR}/decypharr/config.json" >"$_tmp" 2>/dev/null; then
                 mv "$_tmp" "${CONFIG_DIR}/decypharr/config.json"
                 chmod 600 "${CONFIG_DIR}/decypharr/config.json"
@@ -1097,7 +1099,7 @@ generate_decypharr_config() {
       "name": "torbox",
       "api_key": "${TORBOX_API_KEY}",
       "folder": "/mnt/remote/torbox/__all__",
-      "rate_limit": "55/hour",
+      "rate_limit": "250/minute",
       "use_webdav": true
     }
   ],
@@ -2323,165 +2325,24 @@ configure_arrs() {
 
 configure_seerr() {
     log_step "Auto-configuring Seerr..."
-
-    local seerr_url="http://localhost:${SVC_PORTS[seerr]}"
-    local max_wait=60 elapsed=0 interval=3
-    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-
-    # Wait for Seerr API to be ready (hitting / returns HTML before init completes)
-    while [[ $elapsed -lt $max_wait ]]; do
-        if curl -sf --connect-timeout 3 --max-time 10 -o /dev/null "${seerr_url}/api/v1/status" 2>/dev/null; then
-            printf "\r  %-50s\n" ""
-            log_info "Seerr is ready. (${elapsed}s)"
-            # Give Seerr a moment to fully initialize after API responds
-            sleep 3
+    local attempt
+    for ((attempt = 0; attempt < 20; attempt++)); do
+        if curl -sf --connect-timeout 3 --max-time 5 \
+            "http://localhost:${SVC_PORTS[seerr]}/api/v1/status" -o /dev/null 2>/dev/null; then
             break
         fi
-        printf "\r  %s Waiting for Seerr... %ds/%ds" "${spin_chars:elapsed/interval%${#spin_chars}:1}" "$elapsed" "$max_wait"
-        sleep "$interval"
-        elapsed=$((elapsed + interval))
+        sleep 3
     done
-    printf "\r  %-50s\n" ""
-
-    if [[ $elapsed -ge $max_wait ]]; then
-        log_warn "Seerr did not become ready within ${max_wait}s. Skipping Seerr auto-config."
+    if ! seerr_connect "http://localhost:${SVC_PORTS[seerr]}" "$CONFIG_DIR"; then
+        log_warn "Seerr setup could not complete. Finish its wizard, then run diagnose-connections.sh --repair."
         return 1
     fi
-
-    # Seerr requires the setup wizard to be completed before the API
-    # accepts any write requests (Radarr, Sonarr, Plex/Jellyfin config).
-    local _seerr_public
-    _seerr_public=$(curl -sf --connect-timeout 5 --max-time 15 "${seerr_url}/api/v1/settings/public" 2>/dev/null) || true
-    if [[ -n "$_seerr_public" ]] && (echo "$_seerr_public" | grep -qE '"init"\s*:\s*false' 2>/dev/null ||
-        echo "$_seerr_public" | grep -qE '"hasInit"\s*:\s*false' 2>/dev/null); then
-        log_warn "  Seerr setup wizard not yet completed."
-        log_warn "  Open http://localhost:${SVC_PORTS[seerr]} and finish the wizard, then re-run ./setup.sh or run ./manage.sh reset-auth to complete auto-configuration."
-        return 1
-    fi
-
-    # Get current Seerr Radarr settings
-    local radarr_settings
-    radarr_settings=$(curl -sf --connect-timeout 5 --max-time 15 "${seerr_url}/api/v1/settings/radarr" 2>/dev/null) || true
-
-    # Check if Radarr is already configured
-    if [[ -n "$radarr_settings" ]] && (echo "$radarr_settings" | grep -q '"hostname":"radarr"' 2>/dev/null ||
-        echo "$radarr_settings" | grep -q '"hostname": "radarr"' 2>/dev/null); then
-        log_info "  Seerr already has Radarr configured."
-    else
-        # Query Radarr's default quality profile
-        local radarr_profile_id=1 radarr_profile_name="HD-1080p"
-        local radarr_profiles
-        radarr_profiles=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${RADARR_API_KEY}" \
-            "http://localhost:${SVC_PORTS[radarr]}/api/v3/qualityprofile" 2>/dev/null) || true
-        if [[ -n "$radarr_profiles" ]]; then
-            local _id _name
-            _id=$(echo "$radarr_profiles" | jq -r '.[0].id // empty' 2>/dev/null) || true
-            _name=$(echo "$radarr_profiles" | jq -r '.[0].name // empty' 2>/dev/null) || true
-            [[ -n "$_id" ]] && radarr_profile_id="$_id"
-            [[ -n "$_name" ]] && radarr_profile_name="$_name"
-        fi
-        # Add Radarr to Seerr
-        curl -sf --connect-timeout 5 --max-time 15 -X POST \
-            -H "Content-Type: application/json" \
-            "${seerr_url}/api/v1/settings/radarr" \
-            -d '{
-                "name": "Radarr",
-                "hostname": "radarr",
-                "port": 7878,
-                "apiKey": "'"${RADARR_API_KEY}"'",
-                "useSsl": false,
-                "baseUrl": "",
-                "activeProfileId": '"${radarr_profile_id}"',
-                "activeProfileName": "'"${radarr_profile_name}"'",
-                "activeDirectory": "/data/media/movies",
-                "is4k": false,
-                "minimumAvailability": "released",
-                "tags": [],
-                "isDefault": true,
-                "externalUrl": ""
-            }' -o /dev/null 2>/dev/null && log_info "  Radarr added to Seerr (profile: ${radarr_profile_name})." ||
-            log_warn "  Failed to add Radarr to Seerr. You can configure it manually."
-    fi
-
-    # Get current Seerr Sonarr settings
-    local sonarr_settings
-    sonarr_settings=$(curl -sf --connect-timeout 5 --max-time 15 "${seerr_url}/api/v1/settings/sonarr" 2>/dev/null) || true
-
-    # Check if Sonarr is already configured
-    if [[ -n "$sonarr_settings" ]] && (echo "$sonarr_settings" | grep -q '"hostname":"sonarr"' 2>/dev/null ||
-        echo "$sonarr_settings" | grep -q '"hostname": "sonarr"' 2>/dev/null); then
-        log_info "  Seerr already has Sonarr configured."
-    else
-        # Query Sonarr's default quality profile
-        local sonarr_profile_id=1 sonarr_profile_name="HD-1080p"
-        local sonarr_profiles
-        sonarr_profiles=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${SONARR_API_KEY}" \
-            "http://localhost:${SVC_PORTS[sonarr]}/api/v3/qualityprofile" 2>/dev/null) || true
-        if [[ -n "$sonarr_profiles" ]]; then
-            local _id _name
-            _id=$(echo "$sonarr_profiles" | jq -r '.[0].id // empty' 2>/dev/null) || true
-            _name=$(echo "$sonarr_profiles" | jq -r '.[0].name // empty' 2>/dev/null) || true
-            [[ -n "$_id" ]] && sonarr_profile_id="$_id"
-            [[ -n "$_name" ]] && sonarr_profile_name="$_name"
-        fi
-        # Add Sonarr to Seerr
-        curl -sf --connect-timeout 5 --max-time 15 -X POST \
-            -H "Content-Type: application/json" \
-            "${seerr_url}/api/v1/settings/sonarr" \
-            -d '{
-                "name": "Sonarr",
-                "hostname": "sonarr",
-                "port": 8989,
-                "apiKey": "'"${SONARR_API_KEY}"'",
-                "useSsl": false,
-                "baseUrl": "",
-                "activeProfileId": '"${sonarr_profile_id}"',
-                "activeProfileName": "'"${sonarr_profile_name}"'",
-                "activeDirectory": "/data/media/tv",
-                "is4k": false,
-                "tags": [],
-                "isDefault": true,
-                "externalUrl": ""
-            }' -o /dev/null 2>/dev/null && log_info "  Sonarr added to Seerr (profile: ${sonarr_profile_name})." ||
-            log_warn "  Failed to add Sonarr to Seerr. You can configure it manually."
-    fi
-
-    # Configure Plex or Jellyfin connection in Seerr
-    if [[ "${MEDIA_SERVER}" == "plex" ]]; then
-        local plex_token=""
-        local plex_prefs="${CONFIG_DIR}/plex/Library/Application Support/Plex Media Server/Preferences.xml"
-        if [[ -f "$plex_prefs" ]]; then
-            plex_token=$(sed -n 's/.*PlexOnlineToken="\([^"][^"]*\)".*/\1/p' "$plex_prefs" 2>/dev/null) || true
-        fi
-        if [[ -n "$plex_token" ]]; then
-            curl -sf --connect-timeout 5 --max-time 15 -X POST \
-                -H "Content-Type: application/json" \
-                "${seerr_url}/api/v1/settings/plex" \
-                -d '{
-                    "name": "Plex",
-                    "ip": "plex",
-                    "port": 32400,
-                    "useSsl": false,
-                    "plexToken": "'"${plex_token}"'",
-                    "libraries": [],
-                    "webAppUrl": "http://localhost:32400/web"
-                }' -o /dev/null 2>/dev/null && log_info "  Plex server added to Seerr." ||
-                log_warn "  Failed to add Plex to Seerr. You can configure it manually."
-        fi
-    else
-        curl -sf --connect-timeout 5 --max-time 15 -X POST \
-            -H "Content-Type: application/json" \
-            "${seerr_url}/api/v1/settings/jellyfin" \
-            -d '{
-                "name": "Jellyfin",
-                "ip": "jellyfin",
-                "port": 8096,
-                "useSsl": false,
-                "externalUrl": "",
-                "libraries": []
-            }' -o /dev/null 2>/dev/null && log_info "  Jellyfin server added to Seerr." ||
-            log_warn "  Failed to add Jellyfin to Seerr. You can configure it manually."
-    fi
+    local failed=0
+    seerr_sync_arr radarr "$RADARR_API_KEY" true || failed=1
+    seerr_sync_arr sonarr "$SONARR_API_KEY" true || failed=1
+    # The wizard owns Plex/Jellyfin selection, tokens and library choices.
+    # Do not overwrite those choices while refreshing *arr credentials.
+    return "$failed"
 }
 
 # ============================================================================
