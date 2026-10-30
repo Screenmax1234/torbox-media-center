@@ -5,10 +5,10 @@
 #  install directory by setup.sh. Hardware acceleration tweaks live in
 #  docker-compose.override.yml (auto-generated, do not edit by hand).
 #
-#  It IS expected that users edit this file post-install for LAN access
-#  (changing 127.0.0.1:PORT:PORT to PORT:PORT — see README "Accessing From
-#  Other Devices"). Any such edits are preserved across `./manage.sh update`,
-#  but will be overwritten if you re-run `./setup.sh`.
+#  All published ports are LAN-accessible by default. Users may edit this file
+#  post-install to restrict bindings to localhost or change host ports — see
+#  README "Accessing From Other Devices". Such edits are preserved across
+#  `./manage.sh update`, but will be overwritten if you re-run `./setup.sh`.
 # ============================================================================
 
 networks:
@@ -37,7 +37,9 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:8282:8282"
+      # Decypharr's web UI/API is needed from LAN clients (for example, when
+      # configuring it from another computer on a CasaOS host).
+      - "8282:8282"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -85,7 +87,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:9696:9696"
+      - "9696:9696"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -128,7 +130,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:8191:8191"
+      - "8191:8191"
     logging:
       driver: json-file
       options:
@@ -166,7 +168,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:7878:7878"
+      - "7878:7878"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -211,7 +213,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:8989:8989"
+      - "8989:8989"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -256,7 +258,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:5055:5055"
+      - "5055:5055"
     environment:
       - TZ=${TZ:-UTC}
     depends_on:
@@ -300,7 +302,7 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:32400:32400"
+      - "32400:32400"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}
@@ -349,11 +351,11 @@ services:
     networks:
       - media-network
     ports:
-      - "127.0.0.1:8096:8096"
+      - "8096:8096"
       # 8920 is Jellyfin's HTTPS listener — only needed if you terminate TLS
       # inside the container (uncommon; most users use a reverse proxy instead).
       # Uncomment if you configure Jellyfin's built-in HTTPS:
-      # - "127.0.0.1:8920:8920"
+      # - "8920:8920"
     environment:
       - PUID=${PUID:-1000}
       - PGID=${PGID:-1000}

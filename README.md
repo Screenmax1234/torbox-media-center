@@ -62,6 +62,12 @@ Run `./setup-fixed.sh --help` for all available options.
 SSH into your CasaOS box and authenticate GitHub access to the private repository first. Then clone it and pass your TorBox API key:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/Screenmax1234/torbox-media-center/main/install-casaos.sh | TORBOX_API_KEY="your-api-key" bash
+```
+
+If you prefer to clone and run it manually:
+
+```bash
 git clone https://github.com/Screenmax1234/torbox-media-center.git /DATA/AppData/torbox-media-server-src
 cd /DATA/AppData/torbox-media-server-src
 TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup-fixed.sh --yes
@@ -211,7 +217,7 @@ User Request                Search & Automation           Cloud Download
 
 | Service | Port | What It Does |
 |---------|------|--------------| 
-| **Decypharr** | 8282 | The bridge between Radarr/Sonarr and TorBox. Pretends to be qBittorrent, mounts TorBox's cloud storage via WebDAV, and creates symlinks (shortcuts) to cloud files. |
+| **Decypharr** | 8282 | The bridge between Radarr/Sonarr and TorBox. Pretends to be qBittorrent, mounts TorBox's cloud storage via WebDAV, and creates symlinks (shortcuts) to cloud files. Its web UI/API is available on the host LAN. |
 | **Prowlarr** | 9696 | Manages your torrent indexers (search sources). When Radarr/Sonarr need a torrent, Prowlarr searches all your configured sites. |
 | **Byparr** | 8191 | Helps Prowlarr bypass Cloudflare protection on some indexer sites. Works automatically in the background. |
 | **Radarr** | 7878 | Movie manager. Searches for movies, picks the best quality torrent, sends it to Decypharr, and organizes your movie library. |
@@ -220,7 +226,9 @@ User Request                Search & Automation           Cloud Download
 | **Plex** | 32400 | Media server option 1. Streams your library to any device. Requires a free Plex account. |
 | **Jellyfin** | 8096 | Media server option 2 (open-source, no account needed). Streams your library to any device. |
 
-> **Note:** All service ports including Plex and Jellyfin are bound to `127.0.0.1` (localhost only) by default for security. To stream from other devices on your LAN, you will need to expose the Plex/Jellyfin ports. See [Accessing From Other Devices](#accessing-from-other-devices).
+From another device, replace `localhost` in these URLs with the server's LAN IP address, such as `http://10.11.12.61:5055`.
+
+> **Note:** All published service ports are bound to the host LAN by default, so you can open the stack from another device using the server's IP address. Protect the host with a firewall and never expose these admin ports directly to the public internet.
 
 ---
 
@@ -469,27 +477,25 @@ The project root also contains:
 
 ## Accessing From Other Devices
 
-By default, all services are bound to `127.0.0.1` (localhost only) - meaning only the computer running the server can access them. To let other devices on your network (phones, TVs, other computers) access your media server:
+Every published service is available on the host LAN by default. Use the server's IP address with the port map above, for example `http://YOUR-SERVER-IP:5055` for Seerr or `http://YOUR-SERVER-IP:32400/web` for Plex.
 
 ### Option 1: Edit Port Bindings (Simple)
 
-Edit `docker-compose.yml` and change `127.0.0.1:PORT:PORT` to `0.0.0.0:PORT:PORT` (or just `PORT:PORT`) for the services you want to expose:
+The provided Compose file already uses LAN-accessible bindings. If you later want to restrict a service to the server itself, change its binding to `127.0.0.1:PORT:PORT`:
 
 ```yaml
-# Before (localhost only):
-ports:
-  - "127.0.0.1:5055:5055"
-
-# After (accessible from any device on your network):
+# LAN-accessible:
 ports:
   - "5055:5055"
+
+# Localhost-only:
+ports:
+  - "127.0.0.1:5055:5055"
 ```
 
 Then restart: `./manage.sh restart`
 
-By default **every** service - including Plex and Jellyfin - is bound to `127.0.0.1` (loopback) only. If you want other devices on your LAN to reach them, you must explicitly relax the binding for the chosen service.
-
-> **Plex note:** To expose Plex on your LAN, change `"127.0.0.1:32400:32400"` to `"32400:32400"` in `docker-compose.yml`, then run `./manage.sh restart`. Plex will then be reachable at `http://YOUR-IP:32400/web`. The same applies to Jellyfin (`8096`) and Seerr (`5055`).
+After changing a binding, restart the stack with `./manage.sh restart`.
 
 ### Option 2: Reverse Proxy (Advanced)
 
@@ -499,7 +505,7 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 
 ## Security Notes
 
-- **Ports are bound to `127.0.0.1`** by default, preventing LAN/WAN exposure of admin UIs, including Plex and Jellyfin
+- **Ports are bound to the host LAN** by default so the stack works like a normal Docker deployment; use a firewall or change bindings to `127.0.0.1` when local-only access is preferred
 - **Authentication is set to `Forms` with `Enabled`** automatically during setup. Secure admin credentials are auto-generated for Radarr, Sonarr, and Prowlarr, ensuring they are protected by default if you choose to expose them to your LAN
 - **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys - it's `chmod 600` (owner-read only). Don't commit it to version control
 - **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access - other containers only read files via symlinks
@@ -651,7 +657,7 @@ Some sites have advanced protections that no automated solver can bypass. Try:
 
 ### Services not accessible from other devices
 
-Ports are bound to `127.0.0.1` by default. See [Accessing From Other Devices](#accessing-from-other-devices) above.
+All published ports are LAN-accessible by default. If a service is unreachable, check the host firewall and the port binding in `docker-compose.yml`. See [Accessing From Other Devices](#accessing-from-other-devices) above.
 
 ### "Seerr can't connect to Radarr/Sonarr"
 
@@ -710,7 +716,10 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
    grep -v $'\x1b' /DATA/AppData/torbox-media-server/.env > /tmp/torbox.env && mv /tmp/torbox.env /DATA/AppData/torbox-media-server/.env
    cd /DATA/AppData/torbox-media-server && ./manage.sh restart
    ```
-   Or re-run the curl installer (it auto-repairs `.env` now).
+   Or re-run the CasaOS curl installer (it auto-repairs `.env` now):
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Screenmax1234/torbox-media-center/main/install-casaos.sh | TORBOX_API_KEY=*** bash
+   ```
 6. **Radarr/Sonarr unhealthy on first start** - common on slower CasaOS boxes (DB migration can take several minutes):
    ```bash
    sudo chown -R 1000:1000 /DATA/AppData/torbox-media-server/configs /DATA/AppData/torbox-media-server/data
@@ -740,7 +749,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 - **Only Decypharr gets FUSE/SYS_ADMIN** - Plex/Jellyfin/Radarr/Sonarr only read files, they don't need elevated privileges
 - **Plex on bridge networking** - Plex runs on the same Docker bridge network as all other services, allowing Seerr to connect via container name (`http://plex:32400`). Host networking was avoided because many Linux firewalls (UFW, firewalld) block traffic from Docker bridge containers to the host, causing Seerr ↔ Plex connectivity failures
 - **Plex notifications on Radarr/Sonarr** - triggers an instant Plex library scan when content is imported, upgraded, or deleted, so new media appears in seconds instead of waiting for Plex's periodic scan interval
-- **Ports bound to localhost** - prevents accidental LAN/WAN exposure of admin UIs, including Plex and Jellyfin
+- **LAN-accessible port bindings** - make the stack behave like a normal Docker deployment; use firewall rules and reverse proxy authentication before allowing internet access
 - **Mount propagation** - uses `rshared` on Decypharr (the mount source) and `rslave` on media servers (consumers); a systemd service (`torbox-media-server`) handles this automatically on boot, and `manage.sh` re-applies it as a safety net
 - **Hardlinks disabled** - debrid setups use symlinks from Decypharr's WebDAV mount, not local files; hardlinks would fail
 - **Systemd auto-start** - a `torbox-media-server.service` unit handles mount propagation and container startup on boot, so users never have to manually start services after a reboot

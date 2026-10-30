@@ -8,12 +8,12 @@
 # even when CasaOS starts containers before setup finishes.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/nordicnode/TorBox-Media-Server/main/install-casaos.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Screenmax1234/torbox-media-center/main/install-casaos.sh | bash
 #
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_URL="https://github.com/nordicnode/TorBox-Media-Server.git"
+REPO_URL="https://github.com/Screenmax1234/torbox-media-center.git"
 INSTALL_BASE="/DATA/AppData/torbox-media-server"
 REPO_DIR="${INSTALL_BASE}/repo"
 

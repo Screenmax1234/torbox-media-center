@@ -120,11 +120,11 @@ else
     warn "Docker not available — skipping compose validation"
 fi
 
-# 2.3 All ports bound to 127.0.0.1
-if grep -E '^\s+- "[0-9]' "$COMPOSE_FILE" | grep -vq '127.0.0.1:' 2>/dev/null; then
-    fail "Some ports not bound to 127.0.0.1 (security risk)"
+# 2.3 All published service ports are intentionally LAN-accessible.
+if grep -E '^\s+- "[0-9]' "$COMPOSE_FILE" | grep -q '127.0.0.1:' 2>/dev/null; then
+    fail "Some service ports are still bound to localhost"
 else
-    pass "All ports bound to 127.0.0.1"
+    pass "All published service ports are LAN-accessible"
 fi
 
 # 2.4 No :latest tags (all services pinned)
@@ -557,7 +557,7 @@ fi
 section "Cross-Cutting Consistency"
 
 # 9.1 SVC_PORTS in manage.sh match docker-compose.yml
-compose_ports=$(grep -oE '127\.0\.0\.1:[0-9]+' "$COMPOSE_FILE" | sed 's/127.0.0.1://' | sort -u)
+compose_ports=$(grep -E '^\s+- "[^\"]*:[0-9]+"' "$COMPOSE_FILE" | grep -oE '[0-9]+"$' | tr -d '"' | sort -u)
 for port in 8282 9696 8191 7878 8989 5055; do
     if echo "$compose_ports" | grep -q "^${port}$"; then
         pass "Port $port in manage.sh matches docker-compose.yml"
