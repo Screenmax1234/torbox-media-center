@@ -33,6 +33,27 @@ For unattended installs:
 TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" ./setup.sh --yes
 ```
 
+The repository also includes `setup-fixed.sh`, which uses the same installer
+and adds a repair path for installations created by an older release:
+
+```bash
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" ./setup-fixed.sh --yes
+./setup-fixed.sh --repair /path/to/torbox-media-server
+```
+
+On Windows, use the equivalent PowerShell repair command:
+
+```powershell
+.\repair-install.ps1 -InstallDir C:\torbox-media-server
+```
+
+The Decypharr image is built locally from `Dockerfile.decypharr`; it is not a
+published image named `torbox-decypharr`. The fixed deployment copies that
+Dockerfile into the install directory, builds it during startup, and excludes
+it from remote image pulls. If Docker reports `pull access denied for
+torbox-decypharr`, run the repair command above. It preserves `.env`, service
+configuration, and media data while refreshing only the deployment files.
+
 Run `./setup.sh --help` for all available options.
 
 ### CasaOS (Ubuntu)

@@ -1319,8 +1319,9 @@ ENV_EOF
 generate_docker_compose() {
     log_step "Setting up Docker Compose..."
 
-    # Copy static compose file from repo to install directory
+    # Copy static compose file and Dockerfile from repo to install directory
     cp "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
+    cp "${SCRIPT_DIR}/Dockerfile.decypharr" "${INSTALL_DIR}/Dockerfile.decypharr"
 
     # Ensure no ghost overrides remain from previous installations
     rm -f "${INSTALL_DIR}/docker-compose.override.yml"
@@ -1505,6 +1506,20 @@ ensure_mount_propagation() {
     fi
 }
 
+pull_remote_images() {
+    # Decypharr is built locally from Dockerfile.decypharr.  Never pass it to
+    # `docker compose pull`: its old local tag caused Docker to query Docker
+    # Hub and fail with "pull access denied for torbox-decypharr".
+    local profile
+    profile="$(env_val COMPOSE_PROFILES)"
+    local services=(prowlarr byparr radarr sonarr seerr)
+    case "${profile}" in
+        plex) services+=(plex) ;;
+        jellyfin) services+=(jellyfin) ;;
+    esac
+    compose_cmd pull "${services[@]}"
+}
+
 show_help() {
     echo -e "${CYAN}TorBox Media Server - Management${NC}"
     echo ""
@@ -1517,8 +1532,8 @@ show_help() {
     echo "  status      Show service status"
     echo "  logs        Show logs (follow mode)"
     echo "  logs <svc>  Show logs for a specific service"
-    echo "  pull        Pull pinned image versions"
-    echo "  update      Pull pinned images and restart"
+    echo "  pull        Pull published images (Decypharr is built locally)"
+    echo "  update      Pull published images, rebuild Decypharr, and restart"
     echo "  down        Stop and remove containers"
     echo "  urls        Show all service URLs"
     echo "  keys        Show API keys"
@@ -1668,7 +1683,7 @@ case "${1:-help}" in
     start)
         echo -e "${GREEN}Starting all services...${NC}"
         ensure_mount_propagation
-        compose_cmd up -d --remove-orphans
+        compose_cmd up -d --build --remove-orphans
         show_urls
         ;;
     stop)
@@ -1679,7 +1694,7 @@ case "${1:-help}" in
         echo -e "${YELLOW}Restarting all services...${NC}"
         compose_cmd stop
         ensure_mount_propagation
-        compose_cmd up -d --remove-orphans
+        compose_cmd up -d --build --remove-orphans
         show_urls
         ;;
     status)
@@ -1693,14 +1708,14 @@ case "${1:-help}" in
         fi
         ;;
     pull)
-        echo -e "${GREEN}Pulling pinned images...${NC}"
-        compose_cmd pull
+        echo -e "${GREEN}Pulling published images (Decypharr is built locally)...${NC}"
+        pull_remote_images
         ;;
     update)
         echo -e "${GREEN}Updating all services...${NC}"
         ensure_mount_propagation
-        compose_cmd pull
-        compose_cmd up -d --remove-orphans
+        pull_remote_images
+        compose_cmd up -d --build --remove-orphans
         show_urls
         ;;
     down)
@@ -1808,7 +1823,7 @@ case "${1:-help}" in
             sudo chown -R "$(env_val PUID):$(env_val PGID)" "${SCRIPT_DIR}/configs" "${SCRIPT_DIR}/data" 2>/dev/null && \
             echo "  Restored configs/"
         echo -e "${GREEN}Starting containers...${NC}"
-        compose_cmd up -d --remove-orphans
+        compose_cmd up -d --build --remove-orphans
         echo -e "${GREEN}Restore complete.${NC}"
         ;;
     health)
@@ -1890,7 +1905,7 @@ ExecStartPre=/bin/bash -c "findmnt -n '\$MOUNT_DIR' >/dev/null 2>&1 || mount --b
 ExecStartPre=/bin/bash -c "mount --make-shared '\$MOUNT_DIR'"
 
 # Step 2: Start all containers (foreground so systemd tracks the process)
-ExecStart=${docker_bin} ${compose_args} --env-file "${ENV_FILE}" up --remove-orphans
+ExecStart=${docker_bin} ${compose_args} --env-file "${ENV_FILE}" up --build --remove-orphans
 
 # On stop: bring containers down gracefully
 ExecStop=${docker_bin} ${compose_args} --env-file "${ENV_FILE}" stop
@@ -3120,9 +3135,11 @@ start_services() {
     fi
     if [[ "${start_now,,}" != "n" ]]; then
         log_step "Starting Docker containers (first run downloads ~5-8 GB of images, this may take several minutes)..."
-        if ! compose_cmd up -d --remove-orphans; then
+        # Decypharr is a local build.  --build prevents Compose from trying to
+        # pull a stale local tag and repairs installs missing its Dockerfile.
+        if ! compose_cmd up -d --build --remove-orphans; then
             log_error "Failed to start services. Check your internet connection and disk space."
-            log_error "Try running: cd ${INSTALL_DIR} && docker compose --env-file .env -f docker-compose.yml up -d"
+            log_error "Try running: cd ${INSTALL_DIR} && docker compose --env-file .env -f docker-compose.yml up -d --build"
             # Return non-zero so main() knows services didn't start — configs are
             # already written, so we DO want .setup_complete to be touched (the
             # install is structurally complete), but we should not silently

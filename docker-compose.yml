@@ -21,7 +21,7 @@ services:
   # handles WebDAV mounting via built-in rclone, and creates symlinks.
   #
   # We build a thin local image (Dockerfile.decypharr) on top of the
-  # upstream release.  The only change is an `adduser` for UID 1000 so
+  # upstream release.  The only change is an `adduser` for the runtime UID so
   # that fusermount3 can resolve the username when the container runs as
   # a non-root user (fixes issue #24 / regression from #23).
   decypharr:
@@ -30,7 +30,7 @@ services:
       dockerfile: Dockerfile.decypharr
       args:
         DECYPHARR_VERSION: "v2.4"
-    image: torbox-decypharr:v2.4
+        APP_UID: "${PUID:-1000}"
     container_name: decypharr
     user: "${PUID:-1000}:${PGID:-1000}"
     restart: unless-stopped

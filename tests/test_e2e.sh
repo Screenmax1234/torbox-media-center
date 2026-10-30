@@ -170,6 +170,15 @@ else
     fail "Mount propagation not properly configured"
 fi
 
+# 2.9 Decypharr must be built locally. A registry-style local tag causes
+# `docker compose up` / `docker compose pull` to fail with pull access denied.
+if grep -q 'dockerfile: Dockerfile.decypharr' "$COMPOSE_FILE" &&
+    ! grep -qE '^    image: torbox-decypharr:' "$COMPOSE_FILE"; then
+    pass "Decypharr uses the local Dockerfile build (no registry pull)"
+else
+    fail "Decypharr still references a registry-style local image tag"
+fi
+
 # ============================================================================
 #  3. SETUP.SH STRUCTURAL TESTS
 # ============================================================================

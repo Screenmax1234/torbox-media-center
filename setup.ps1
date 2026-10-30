@@ -557,6 +557,15 @@ function Invoke-GenerateDockerCompose {
     Copy-Item -Path $SourceFile -Destination $ComposeFile -Force
     Write-LogInfo "Copied docker-compose.yml to: $ComposeFile"
 
+    $DockerfileSource = Join-Path $ScriptDir "Dockerfile.decypharr"
+    $DockerfileDestination = Join-Path $InstallDir "Dockerfile.decypharr"
+    if (-not (Test-Path $DockerfileSource)) {
+        Write-LogError "Dockerfile.decypharr is missing from the source directory: $DockerfileSource"
+        throw "Cannot build Decypharr without Dockerfile.decypharr"
+    }
+    Copy-Item -Path $DockerfileSource -Destination $DockerfileDestination -Force
+    Write-LogInfo "Copied Dockerfile.decypharr to: $DockerfileDestination"
+
     $OverrideFile = Join-Path $InstallDir "docker-compose.override.yml"
     if (Test-Path $OverrideFile) { Remove-Item -Path $OverrideFile -Force }
 
@@ -644,7 +653,7 @@ function Invoke-StartServices {
     if ($startNow.ToLower() -ne 'n') {
         Write-LogStep "Starting Docker containers..."
         Set-Location $InstallDir
-        docker compose --env-file .env up -d --remove-orphans
+        docker compose --env-file .env up -d --build --remove-orphans
         if ($LASTEXITCODE -ne 0) {
             Write-LogError "Failed to start services."
             return
