@@ -16,6 +16,7 @@ case "${1:-}" in
     --help|-h)
         echo "Usage: ./setup-fixed.sh [setup.sh options]"
         echo "       ./setup-fixed.sh --repair [INSTALL_DIR]"
+        echo "       ./setup-fixed.sh --refresh-management"
         echo ""
         echo "The normal path runs setup.sh with the local Decypharr build fix."
         echo "--repair updates an existing install and rebuilds Decypharr."

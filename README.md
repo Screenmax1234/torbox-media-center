@@ -673,6 +673,18 @@ If this doesn't work, check that both containers are running (`./manage.sh statu
 
 ### How do I find my API keys?
 
+`./manage.sh keys` shows masked values. Use `./manage.sh keys --show-secrets`
+to view the full keys and admin credentials locally.
+
+If an older installed script reports `$2: unbound variable`, refresh it from
+the updated source checkout (no container restart is needed):
+
+```bash
+cd /path/to/torbox-media-center
+git pull --ff-only
+TORBOX_INSTALL_DIR=/path/to/torbox-media-center/torbox-media-server bash setup.sh --refresh-management
+```
+
 Use the management script:
 ```bash
 cd torbox-media-server/

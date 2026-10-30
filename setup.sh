@@ -1566,7 +1566,7 @@ show_urls() {
 cmd_keys() {
     local show_secrets=false
     local _radarr_pass _sonarr_pass _prowlarr_pass
-    if [[ "$2" == "--show-secrets" ]]; then
+    if [[ "${2:-}" == "--show-secrets" ]]; then
         show_secrets=true
     fi
 
@@ -3168,6 +3168,17 @@ main() {
     # Parse command-line flags (moved to the very beginning)
     for arg in "$@"; do
         case "$arg" in
+            --refresh-management)
+                if [[ ! -f "${ENV_FILE}" ]]; then
+                    log_error "No existing .env found at ${ENV_FILE}. Run setup first or set TORBOX_INSTALL_DIR."
+                    return 1
+                fi
+                if [[ -f "${INSTALL_DIR}/manage.sh" ]]; then
+                    cp -p "${INSTALL_DIR}/manage.sh" "${INSTALL_DIR}/manage.sh.bak"
+                fi
+                generate_management_script
+                return 0
+                ;;
             -y | --yes | --non-interactive) NON_INTERACTIVE=true ;;
             -d | --dry-run) DRY_RUN=true ;;
             -h | --help)
@@ -3175,6 +3186,7 @@ main() {
                 echo "Usage: ./setup.sh [OPTIONS]"
                 echo ""
                 echo "Options:"
+                echo "  --refresh-management         Refresh manage.sh only (preserves configs and running containers)"
                 echo "  -y, --yes, --non-interactive  Use defaults for all prompts"
                 echo "  -d, --dry-run                 Preview changes without applying them"
                 echo "  -h, --help                    Show this help"

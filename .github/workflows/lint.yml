@@ -115,6 +115,9 @@ jobs:
       - name: Run setup function tests
         run: bash tests/test_setup_functions.sh
 
+      - name: Test generated management commands
+        run: bash tests/test_manage_keys.sh
+
       - name: Extract and validate manage.sh
         run: |
           # Extract the heredoc content that generates manage.sh from setup.sh.

@@ -43,6 +43,9 @@ cp "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
 cp "${SCRIPT_DIR}/Dockerfile.decypharr" "${DOCKERFILE}"
 chmod 600 "${COMPOSE_FILE}" "${ENV_FILE}"
 
+# Refresh the generated management script too; git pull alone cannot update it.
+TORBOX_INSTALL_DIR="${INSTALL_DIR}" bash "${SCRIPT_DIR}/setup.sh" --refresh-management
+
 echo -e "${green}[INFO]${reset} Deployment files refreshed. Backup: ${backup_dir}"
 if ! (cd "${INSTALL_DIR}" && docker compose --env-file "${ENV_FILE}" config -q); then
     die "The refreshed Compose configuration is invalid. Your original files are in ${backup_dir}."

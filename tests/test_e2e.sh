@@ -613,6 +613,12 @@ else
     fail "test_setup_functions.sh — tests failed"
 fi
 
+if bash "${SCRIPT_DIR}/test_manage_keys.sh" &>/dev/null; then
+    pass "test_manage_keys.sh — generated commands and management refresh pass"
+else
+    fail "test_manage_keys.sh — generated commands or management refresh failed"
+fi
+
 # ============================================================================
 #  11. SHELLCHECK (if available)
 # ============================================================================
