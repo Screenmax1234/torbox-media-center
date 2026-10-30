@@ -4,11 +4,9 @@
 
 **A single-command, zero-storage personal streaming setup - powered by TorBox cloud.**
 
-[![ShellCheck](https://github.com/nordicnode/TorBox-Media-Server/actions/workflows/lint.yml/badge.svg)](https://github.com/nordicnode/TorBox-Media-Server/actions/workflows/lint.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/Requires-Docker-blue?logo=docker)](https://docs.docker.com/get-docker/)
 [![TorBox](https://img.shields.io/badge/Powered%20by-TorBox-orange)](https://torbox.app)
-[![GitHub Stars](https://badgen.net/github/stars/nordicnode/TorBox-Media-Server?icon=github&color=4a90e2)](https://github.com/nordicnode/TorBox-Media-Server/stargazers)
 
 </div>
 
@@ -23,8 +21,9 @@ A single script that installs, configures, and runs a complete debrid-powered me
 ### Linux
 
 ```bash
-git clone https://github.com/nordicnode/TorBox-Media-Server.git && cd TorBox-Media-Server
-chmod +x setup.sh && ./setup.sh
+git clone https://github.com/Screenmax1234/torbox-media-center.git
+cd torbox-media-center
+chmod +x setup-fixed.sh && ./setup-fixed.sh
 ```
 
 For unattended installs:
@@ -54,14 +53,16 @@ it from remote image pulls. If Docker reports `pull access denied for
 torbox-decypharr`, run the repair command above. It preserves `.env`, service
 configuration, and media data while refreshing only the deployment files.
 
-Run `./setup.sh --help` for all available options.
+Run `./setup-fixed.sh --help` for all available options.
 
 ### CasaOS (Ubuntu)
 
-SSH into your CasaOS box. **You must pass your TorBox API key** (the curl one-liner cannot prompt interactively):
+SSH into your CasaOS box and authenticate GitHub access to the private repository first. Then clone it and pass your TorBox API key:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nordicnode/TorBox-Media-Server/main/install-casaos.sh | TORBOX_API_KEY="your-api-key" bash
+git clone https://github.com/Screenmax1234/torbox-media-center.git /DATA/AppData/torbox-media-server-src
+cd /DATA/AppData/torbox-media-server-src
+TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup-fixed.sh --yes
 ```
 
 What it does:
@@ -78,11 +79,11 @@ cd /DATA/AppData/torbox-media-server && ./manage.sh status
 
 > Containers run via Docker Compose - they **won't appear as CasaOS app tiles**. Use the URLs above or `manage.sh urls`.
 
-If install failed or nothing is running, re-run the curl command above (it's safe to re-run), or manually:
+If install failed or nothing is running, re-run the setup command above (it's safe to re-run), or manually:
 
 ```bash
 cd /DATA/AppData/torbox-media-server-src
-TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup.sh --yes
+TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup-fixed.sh --yes
 cd /DATA/AppData/torbox-media-server && ./manage.sh start
 ```
 
@@ -91,8 +92,8 @@ cd /DATA/AppData/torbox-media-server && ./manage.sh start
 Open **PowerShell** as **Administrator** and run:
 
 ```powershell
-git clone https://github.com/nordicnode/TorBox-Media-Server.git
-cd TorBox-Media-Server
+git clone https://github.com/Screenmax1234/torbox-media-center.git
+cd torbox-media-center
 .\setup.ps1
 ```
 
@@ -691,9 +692,11 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
    cd /DATA/AppData/torbox-media-server && ./manage.sh status
    docker ps
    ```
-2. **If `manage.sh` is missing**, setup never finished - re-run with your API key:
+2. **If `manage.sh` is missing**, setup never finished - pull the latest files and re-run with your API key:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/nordicnode/TorBox-Media-Server/main/install-casaos.sh | TORBOX_API_KEY=*** bash
+   cd /DATA/AppData/torbox-media-server-src
+   git pull
+   TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY=*** ./setup-fixed.sh --yes
    ```
 3. **Open services by IP, not localhost** - from another device use `http://YOUR-CASAOS-IP:5055` (Seerr), not `localhost`.
 4. **View logs** if a container keeps restarting:
