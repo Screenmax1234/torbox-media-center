@@ -12,7 +12,7 @@
 #  …which prevents the rclone WebDAV mount from ever establishing (issue #24).
 # =============================================================================
 
-ARG DECYPHARR_VERSION=v2.4
+ARG DECYPHARR_VERSION=v2.7.1
 FROM ghcr.io/sirrobot01/decypharr:${DECYPHARR_VERSION}
 
 ARG APP_UID=1000

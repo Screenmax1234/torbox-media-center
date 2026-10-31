@@ -135,6 +135,30 @@ else
     fail "Docker images using :latest tag" "$latest_images"
 fi
 
+# 2.4b Current stable image matrix is pinned in the checked-in Compose file.
+expected_images=(
+    'lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166'
+    'ghcr.io/thephaseless/byparr:3.0.4'
+    'lscr.io/linuxserver/radarr:6.4.4.10685-ls324'
+    'lscr.io/linuxserver/sonarr:4.0.20.3014-ls2'
+    'ghcr.io/seerr-team/seerr:v3.5.1'
+    'lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330'
+    'lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57'
+)
+for expected_image in "${expected_images[@]}"; do
+    if grep -qF "image: ${expected_image}" "$COMPOSE_FILE"; then
+        pass "Pinned image present: ${expected_image}"
+    else
+        fail "Pinned image missing: ${expected_image}"
+    fi
+done
+if grep -qF 'DECYPHARR_VERSION: "v2.7.1"' "$COMPOSE_FILE" &&
+    grep -qF 'ARG DECYPHARR_VERSION=v2.7.1' "$PROJECT_ROOT/Dockerfile.decypharr"; then
+    pass "Decypharr wrapper and Compose use v2.7.1"
+else
+    fail "Decypharr version pins are inconsistent"
+fi
+
 # 2.5 All services have health checks
 services_without_health=$(
     awk '/^  [a-z].*:/{svc=$1} /healthcheck:/{found[svc]=1} END{for(s in found){}; for(s in found) delete found[s]}' "$COMPOSE_FILE" 2>/dev/null || true

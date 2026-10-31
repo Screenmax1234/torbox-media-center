@@ -486,7 +486,7 @@ function Invoke-GenerateDecypharrConfig {
 
     # Generate a fresh config matching setup.sh's schema (debrids[] array,
     # rclone mount, qbittorrent categories, top-level username/password).
-    # This must match setup.sh so both platforms produce a working Decypharr v2.0
+    # This must match setup.sh so both platforms produce a working current Decypharr
     # config — diverging schemas caused broken qBittorrent mocks on one platform.
     $configJson = @"
 {

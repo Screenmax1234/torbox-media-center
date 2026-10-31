@@ -23,21 +23,21 @@ A single script that installs, configures, and runs a complete debrid-powered me
 ```bash
 git clone https://github.com/Screenmax1234/torbox-media-center.git
 cd torbox-media-center
-chmod +x setup-fixed.sh && ./setup-fixed.sh
+bash setup-fixed.sh
 ```
 
 For unattended installs:
 
 ```bash
-TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" ./setup.sh --yes
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" bash setup.sh --yes
 ```
 
 The repository also includes `setup-fixed.sh`, which uses the same installer
 and adds a repair path for installations created by an older release:
 
 ```bash
-TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" ./setup-fixed.sh --yes
-./setup-fixed.sh --repair /path/to/torbox-media-server
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" bash setup-fixed.sh --yes
+bash setup-fixed.sh --repair /path/to/torbox-media-server
 ```
 
 On Windows, use the equivalent PowerShell repair command:
@@ -55,11 +55,11 @@ configuration, and media data while refreshing only the deployment files.
 If setup is run as root and generates `PUID=0`, the Decypharr image reuses the
 existing root account instead of trying to create another UID 0 user.
 
-Run `./setup-fixed.sh --help` for all available options.
+Run `bash setup-fixed.sh --help` for all available options.
 
 ### CasaOS (Ubuntu)
 
-SSH into your CasaOS box and authenticate GitHub access to the private repository first. Then clone it and pass your TorBox API key:
+SSH into your CasaOS box, then clone the public repository and pass your TorBox API key:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Screenmax1234/torbox-media-center/main/install-casaos.sh | TORBOX_API_KEY="your-api-key" bash
@@ -70,7 +70,7 @@ If you prefer to clone and run it manually:
 ```bash
 git clone https://github.com/Screenmax1234/torbox-media-center.git /DATA/AppData/torbox-media-server-src
 cd /DATA/AppData/torbox-media-server-src
-TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup-fixed.sh --yes
+TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" bash setup-fixed.sh --yes
 ```
 
 What it does:
@@ -91,7 +91,7 @@ If install failed or nothing is running, re-run the setup command above (it's sa
 
 ```bash
 cd /DATA/AppData/torbox-media-server-src
-TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" ./setup-fixed.sh --yes
+TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY="your-api-key" bash setup-fixed.sh --yes
 cd /DATA/AppData/torbox-media-server && ./manage.sh start
 ```
 
@@ -119,9 +119,83 @@ Run `.\setup.ps1 --help` for all available options.
 
 ---
 
+## Current release and what changed from the original setup
+
+This repository is the public maintained fork at [github.com/Screenmax1234/torbox-media-center](https://github.com/Screenmax1234/torbox-media-center). It keeps the original TorBox → Decypharr → *arr → Plex/Jellyfin architecture, but the deployment and recovery paths have been repaired after testing the original project.
+
+### Current pinned images
+
+The versions below are the stable image pins in the current Compose file. They are deliberately versioned instead of using `latest`, so an update is reviewable and reproducible. The LinuxServer tags include the image build suffix; keeping that suffix prevents a registry-side rebuild from changing an otherwise identical application version.
+
+| Container | Image pin | Upgrade note |
+|---|---|---|
+| Decypharr | `ghcr.io/sirrobot01/decypharr:v2.7.1` (local wrapper build) | v2.7 includes TorBox rate-limit/backoff fixes; the wrapper still handles runtime UIDs and FUSE. |
+| Prowlarr | `lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166` | Current stable LinuxServer release. |
+| Byparr | `ghcr.io/thephaseless/byparr:3.0.4` | FlareSolverr-compatible API remains at `http://byparr:8191`; keep it under Prowlarr Indexer Proxies, never the global HTTP proxy. |
+| Radarr | `lscr.io/linuxserver/radarr:6.4.4.10685-ls324` | Current 6.4 release; back up the database before upgrading an older 5.x install. |
+| Sonarr | `lscr.io/linuxserver/sonarr:4.0.20.3014-ls2` | Current stable 4.0 release. |
+| Seerr | `ghcr.io/seerr-team/seerr:v3.5.1` | Includes the current 3.5 security fixes. |
+| Plex | `lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330` | Current stable 1.43.5 LinuxServer build. |
+| Jellyfin | `lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57` | Major upgrade from 10.11; Jellyfin recommends a full backup and a post-upgrade library scan. |
+
+The pins were checked against the upstream stable releases available on 2026-10-31. The repository tests validate shell syntax, generated configuration, Compose structure and the image matrix; they cannot run the full Docker stack on every target Linux host. Always keep the backup made by the repair command until the upgraded stack has been tested. The current tested stack has already moved from Radarr 5 to 6 and Jellyfin 10.11 to 12; those are the only major application-line changes in this release. The remaining image changes are patch/build updates.
+
+### Changes that affect existing installations
+
+The following table maps the original behavior to the maintained deployment so an existing user can see why a refresh is needed:
+
+| Area | Original behavior | Current behavior and effect |
+|---|---|---|
+| Decypharr image | Compose referenced a registry-style `torbox-decypharr` image, which caused `pull access denied`. | Compose builds `Dockerfile.decypharr` locally on every start/update, using the upstream `ghcr.io/sirrobot01/decypharr:v2.7.1` base. |
+| Decypharr runtime user | Root installs could try to create UID 0 again; non-root installs could lack a passwd entry for the runtime UID. | The wrapper skips an existing UID and creates a matching account only when needed, so both root and normal-user installs build successfully. |
+| Decypharr configuration mount | A file-level config bind mount could fail when the image adjusted ownership of its config, logs or cache. | The complete `configs/decypharr/` directory is mounted at `/app`, allowing the image startup path to initialize its files. |
+| Host access | Several services were published only on loopback. | Every service port is published on the host LAN by default. From another device use the Linux host IP; container-to-container URLs still use Docker names. |
+| TorBox throttling | The legacy repair path could preserve the obsolete `55/hour` request setting. | New configs use the provider’s general `250/minute` limit. Repair migrates only that exact legacy value and preserves custom values. |
+| Prowlarr / Byparr | Byparr could be mistaken for a global HTTP/SOCKS proxy. | Byparr is configured as the FlareSolverr-compatible indexer proxy at `http://byparr:8191`; the global proxy remains disabled. |
+| Seerr connections | Existing connections could be skipped or retained with stale API keys. | Setup and `diagnose-connections.sh --repair` authenticate, test and refresh the Radarr/Sonarr records before saving them. |
+| Plex imports | Remote FUSE changes might not trigger a filesystem watcher, and old installs could have stale notifications. | `repair-plex.sh` repairs Radarr/Sonarr import notifications; Plex automatic title scanning is documented as the fallback for remote mounts. |
+| Management script | Older generated scripts accepted a required second argument for `keys`, causing `$2: unbound variable` when run as `./manage.sh keys`. | `keys` works by itself and masks secrets by default; use `keys --show-secrets` only when you need the values. The full command list below matches the generated script. |
+| Updating | `manage.sh update` could be mistaken for a repository update. | `manage.sh update` refreshes images using the Compose file already installed. `git pull` plus `bash setup-fixed.sh --repair ...` refreshes Compose, Dockerfile and `manage.sh` while preserving `.env`, configs and media data. |
+
+### Updating an existing Linux installation
+
+Run this from the source checkout. The repair path copies the current Compose file, Decypharr Dockerfile and generated management script into the install directory, validates Compose, rebuilds Decypharr and starts the stack. It preserves `.env`, configs and media data.
+
+```bash
+cd /root/torbox-media-center
+git pull --ff-only
+bash setup-fixed.sh --repair /root/torbox-media-center/torbox-media-server
+```
+
+Use your actual install path if it differs. Before applying a major image upgrade, make a backup with `cd /root/torbox-media-center/torbox-media-server && ./manage.sh backup`. If `git pull` reports local changes to installer files, save them before updating: `git stash push -m "local installer changes" -- repair-install.sh setup-fixed.sh setup.sh`, run the pull, then apply or discard that stash after checking the diff.
+
+After the repair, the installed commands are:
+
+```bash
+cd /root/torbox-media-center/torbox-media-server
+./manage.sh status
+./manage.sh update       # use the pins now installed in this Compose file
+./manage.sh logs sonarr
+./manage.sh logs radarr
+./manage.sh keys
+./manage.sh keys --show-secrets
+```
+
+`./manage.sh update` pulls the published images, rebuilds Decypharr and restarts the stack. It does not fetch a newer Compose file from GitHub. Repeat the `git pull` plus `setup-fixed.sh --repair` sequence when this repository publishes new pins.
+
+For a non-destructive connection check after upgrading:
+
+```bash
+cd /root/torbox-media-center
+bash diagnose-connections.sh
+```
+
+To refresh stale Seerr connections or migrate the legacy Decypharr rate limit, use `bash diagnose-connections.sh --repair`. To repair Plex import notifications, use `bash repair-plex.sh`. Both commands create private backups and avoid submitting downloads.
+
 ## 📑 Table of Contents
 
 - [CasaOS (Ubuntu)](#casaos-ubuntu)
+- [Current release and what changed from the original setup](#current-release-and-what-changed-from-the-original-setup)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
 - [Components](#components)
@@ -335,7 +409,7 @@ The setup script pre-seeds and auto-configures as much as possible so you don't 
 | **Plex** | Libraries for Movies and TV Shows created (if claim token was provided) |
 | **Radarr/Sonarr/Prowlarr** | Admin authentication (Forms auth with auto-generated credentials) configured via API |
 
-> **Requires jq for API configuration.** If jq isn't available, the script skips the JSON-based auto-configuration steps. Run `./setup.sh` again after installing jq to complete configuration.
+> **Requires jq for API configuration.** If jq isn't available, the script skips the JSON-based auto-configuration steps. Run `bash setup.sh` again after installing jq to complete configuration.
 
 ---
 
@@ -382,7 +456,7 @@ Seerr requires a brief one-time wizard:
    - Sonarr should already be listed - click **Test**, then **Save**
 6. Click **Finish Setup**
 
-> **If Radarr/Sonarr aren't connected:** Re-run `./setup.sh` - it detects existing installations and re-configures. Or add them manually:
+> **If Radarr/Sonarr aren't connected:** Re-run `bash setup.sh` - it detects existing installations and re-configures. Or add them manually:
 > - **Radarr:** Hostname `radarr`, Port `7878`, API key from `./manage.sh keys`, Root Folder `/data/media/movies`
 > - **Sonarr:** Hostname `sonarr`, Port `8989`, API key from `./manage.sh keys`, Root Folder `/data/media/tv`
 
@@ -438,6 +512,16 @@ cd torbox-media-server/
 ./manage.sh shell svc # Open a shell inside a container (e.g. radarr)
 ./manage.sh version   # Show version
 ./manage.sh help      # Show all available commands
+```
+
+`logs` accepts an optional service name, `shell` requires a service name, `restore` accepts an optional backup directory name, and `keys` accepts the optional `--show-secrets` flag. The generated script uses safe defaults, so `./manage.sh keys` works without a second argument.
+
+The source checkout also provides two repair helpers that are intentionally separate from the generated management script:
+
+```bash
+bash diagnose-connections.sh       # Read-only API, proxy and endpoint checks
+bash diagnose-connections.sh --repair
+bash repair-plex.sh                 # Test and repair Radarr/Sonarr Plex notifications
 ```
 
 > **Auto-start on boot:** The setup script installs a systemd service (`torbox-media-server`) that automatically handles mount propagation and starts all containers when your computer boots. You don't need to do anything - just turn on your computer and everything will be running.
@@ -509,8 +593,8 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 - **Authentication is set to `Forms` with `Enabled`** automatically during setup. Secure admin credentials are auto-generated for Radarr, Sonarr, and Prowlarr, ensuring they are protected by default if you choose to expose them to your LAN
 - **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys - it's `chmod 600` (owner-read only). Don't commit it to version control
 - **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access - other containers only read files via symlinks
-- **Decypharr config directory is mounted to `/app`** - the entire config directory is bind-mounted (not just config.json) because Decypharr v2.0 needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
-- **Seerr is pinned to v3.4.0+** - v3.4.0 (released 2026-07-28) patches a path traversal vulnerability in the avatar image proxy. If you are running an older Seerr installation, run `./manage.sh update` immediately to pull the patched image
+- **Decypharr config directory is mounted to `/app`** - the entire config directory is bind-mounted (not just config.json) because Decypharr needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
+- **Seerr is pinned to v3.5.1** - this includes the current security fixes in the published 3.5 release line. Keep the source checkout current before upgrading the installed stack.
 
 > ⚠️ **Never expose Radarr, Sonarr, Prowlarr, or Decypharr admin UIs to the public internet** without authentication and a reverse proxy with HTTPS. Seerr is designed for this purpose and has its own authentication system.
 
@@ -525,9 +609,11 @@ cd torbox-media-server/
 ./manage.sh update
 ```
 
-This pulls the pinned Docker image versions and restarts all containers. Your configuration and data are preserved.
+This pulls the pinned Docker image versions already present in the installed Compose file and restarts all containers. Your configuration and data are preserved.
 
-> **Note:** Docker images are pinned to specific versions in `docker-compose.yml` for reproducibility. To upgrade to newer versions, run `git pull` to update the repo, then re-run `./setup.sh` (Linux) or `.\setup.ps1` (Windows) which copies the updated Docker Compose file to your install directory.
+> **Important:** `manage.sh` is generated inside the install directory. If the repository has newer commands or image pins, `manage.sh update` cannot see them until you refresh the installed deployment files.
+
+> **Note:** Docker images are pinned to specific versions in `docker-compose.yml` for reproducibility. `./manage.sh update` updates the versions already copied into the install directory. To receive newer pins from this repository, update the source checkout and run the repair path below; do not rely on `manage.sh update` alone.
 
 ---
 
@@ -566,7 +652,7 @@ You'll be asked to confirm before anything is removed. Your TorBox account and c
 
 ## Environment Variables
 
-The following environment variables can be set before running `./setup.sh --yes` for unattended installs, or used to override defaults in interactive mode:
+The following environment variables can be set before running `bash setup.sh --yes` for unattended installs, or used to override defaults in interactive mode:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -625,7 +711,7 @@ This means the API auto-configuration didn't run (e.g., you chose not to start s
 
 If jq wasn't available during setup, advanced configuration (naming conventions, media management, quality profiles) is skipped. You can:
 
-1. Install jq and re-run `./setup.sh`
+1. Install jq and re-run `bash setup.sh`
 2. Configure manually:
    - **Media Management** → Disable "Use Hardlinks instead of Copy" (**critical** for debrid setups!)
    - **Media Management** → Enable "Import Extra Files" with extensions: `srt,sub,idx,ass,ssa,nfo`
@@ -711,7 +797,7 @@ This tests both *arr → Plex connections before saving, creates missing connect
 
 For manual configuration, open **Settings → Connect → Plex Media Server** in both Radarr and Sonarr. Set host `plex`, port `32400`, enable **On Import** (called **On Download** in some versions), **On Upgrade**, and **Update Library**, authenticate with Plex, then **Test** and **Save**. Both applications and Plex share the same `/data` paths, so new connections do not need remote path mappings.
 
-In Plex **Settings → Library**, automatic scans and periodic scans can be enabled as a fallback. Import notifications request a scan; scanning and metadata matching still take time. A successful **Test** verifies the connection, while a new completed import verifies the actual scan trigger.
+In Plex **Settings → Library**, enable **Scan my library automatically** and choose a periodic scan interval. This matters for TorBox’s remote FUSE mount because remote changes may not produce local filesystem events. Import notifications request a scan; scanning and metadata matching still take time. A successful **Test** verifies the connection, while a new completed import verifies the actual scan trigger.
 
 ### How do I find my API keys?
 
@@ -758,7 +844,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
    ```bash
    cd /DATA/AppData/torbox-media-server-src
    git pull
-   TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY=*** ./setup-fixed.sh --yes
+   TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server TORBOX_CASAOS=true TORBOX_API_KEY=*** bash setup-fixed.sh --yes
    ```
 3. **Open services by IP, not localhost** - from another device use `http://YOUR-CASAOS-IP:5055` (Seerr), not `localhost`.
 4. **View logs** if a container keeps restarting:
@@ -790,7 +876,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 7. **Radarr/Sonarr password from `.env` does not work** - passwords are written to `.env` at install time but only applied to the apps when auto-config runs. If containers were unhealthy during setup, sync them:
    ```bash
    cd /DATA/AppData/torbox-media-server-src && git pull
-   TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server ./setup.sh --sync-auth
+   TORBOX_INSTALL_DIR=/DATA/AppData/torbox-media-server SYNC_AUTH_ONLY=true bash setup.sh
    ```
    Or after updating `manage.sh`: `cd /DATA/AppData/torbox-media-server && ./manage.sh reset-auth`
 
@@ -807,12 +893,12 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 - **Mount propagation** - uses `rshared` on Decypharr (the mount source) and `rslave` on media servers (consumers); a systemd service (`torbox-media-server`) handles this automatically on boot, and `manage.sh` re-applies it as a safety net
 - **Hardlinks disabled** - debrid setups use symlinks from Decypharr's WebDAV mount, not local files; hardlinks would fail
 - **Systemd auto-start** - a `torbox-media-server.service` unit handles mount propagation and container startup on boot, so users never have to manually start services after a reboot
-- **Auto-configured Auth** - the setup script pre-seeds `Forms` auth with `DisabledForLocalAddresses` on first boot (so users can reach the UI even if auto-config fails), then uses the API key to programmatically set admin credentials. A `--sync-auth` flag and `manage.sh reset-auth` command provide manual credential sync
+- **Auto-configured Auth** - the setup script pre-seeds `Forms` auth with `DisabledForLocalAddresses` on first boot (so users can reach the UI even if auto-config fails), then uses the API key to programmatically set admin credentials. `SYNC_AUTH_ONLY=true bash setup.sh` and `manage.sh reset-auth` provide manual credential sync
 - **Pre-seeded API keys** - generated during setup and injected into config.xml before containers start, enabling fully automated API-based configuration
 - **jq for JSON manipulation** - used to modify *arr config via API; auto-installed as a dependency
 - **Quality profile upgrades enabled** - without this, Radarr/Sonarr won't replace a 720p version with a 1080p one; most users want automatic upgrades
-- **Docker images pinned to specific versions** - image tags are pinned in `docker-compose.yml` to avoid breakage from upstream changes; run `git pull` then re-run `./setup.sh` (Linux) or `.\setup.ps1` (Windows) to pick up newer versions intentionally
-- **Decypharr config directory mounted to `/app`** - the entire `configs/decypharr/` directory is bind-mounted to `/app` (not just `config.json`) because Decypharr v2.0 attempts to `chown` the `/app` directory contents on startup; a file-level bind mount causes "Operation not permitted" errors and crash-loops
+- **Docker images pinned to specific versions** - image tags are pinned in `docker-compose.yml` to avoid breakage from upstream changes; on Linux run `git pull` followed by `bash setup-fixed.sh --repair /path/to/torbox-media-server`, and on Windows run `git pull` followed by `.\repair-install.ps1 -InstallDir C:\torbox-media-server`
+- **Decypharr config directory mounted to `/app`** - the entire `configs/decypharr/` directory is bind-mounted to `/app` (not just `config.json`) because Decypharr attempts to `chown` the `/app` directory contents on startup; a file-level bind mount causes "Operation not permitted" errors and crash-loops
 - **Decypharr credentials pre-seeded** - generated during setup and injected into config.json, eliminating manual credential creation
 
 ---
