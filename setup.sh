@@ -85,6 +85,7 @@ SETUP_COMPLETE_FILE="${INSTALL_DIR}/.setup_complete"
 source "${SCRIPT_DIR}/lib/env.sh"
 source "${SCRIPT_DIR}/lib/seerr.sh"
 source "${SCRIPT_DIR}/lib/plex.sh"
+source "${SCRIPT_DIR}/lib/silo.sh"
 
 # Docker image versions are pinned directly in docker-compose.yml.
 
@@ -178,8 +179,11 @@ print_service_urls() {
     done
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
         printf "  %b%-14s%b http://localhost:32400/web\n" "$BOLD" "Plex" "$NC"
-    else
+    elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
         printf "  %b%-14s%b http://localhost:8096\n" "$BOLD" "Jellyfin" "$NC"
+    fi
+    if [[ "${SILO_ENABLED:-false}" == "true" || "$MEDIA_SERVER" == "silo" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "Silo" "$NC" "${SILO_HTTP_PORT:-8090}"
     fi
 }
 
@@ -366,12 +370,16 @@ check_port_conflicts() {
         ports_to_check+=(8096)
         port_names+=("Jellyfin")
     fi
+    if [[ "${SILO_ENABLED:-false}" == "true" || "${MEDIA_SERVER:-}" == "silo" ]]; then
+        ports_to_check+=("${SILO_HTTP_PORT:-8090}" "${SILO_JF_PORT:-8097}" "${SILO_ABS_PORT:-13379}")
+        port_names+=("Silo" "Silo-Jellyfin" "Silo-ABS")
+    fi
     local conflicts=false
     local network_stats=""
     if command -v ss &>/dev/null; then
-        network_stats=$(ss -tlnp 2>/dev/null)
+        network_stats=$(ss -tlnp 2>/dev/null) || network_stats=""
     elif command -v netstat &>/dev/null; then
-        network_stats=$(netstat -tlnp 2>/dev/null)
+        network_stats=$(netstat -tlnp 2>/dev/null) || network_stats=""
     fi
 
     for i in "${!ports_to_check[@]}"; do
@@ -555,7 +563,13 @@ gather_config() {
         MEDIA_SERVER="${TORBOX_MEDIA_SERVER}"
         log_info "Using media server from TORBOX_MEDIA_SERVER env var: ${MEDIA_SERVER}"
     elif [[ -n "${EXISTING_COMPOSE_PROFILES:-}" ]]; then
-        MEDIA_SERVER="${EXISTING_COMPOSE_PROFILES}"
+        if [[ "${EXISTING_COMPOSE_PROFILES}" == *plex* ]]; then
+            MEDIA_SERVER=plex
+        elif [[ "${EXISTING_COMPOSE_PROFILES}" == *jellyfin* ]]; then
+            MEDIA_SERVER=jellyfin
+        else
+            MEDIA_SERVER=silo
+        fi
         log_info "Keeping existing media server: ${MEDIA_SERVER}"
     elif [[ "$NON_INTERACTIVE" == "true" ]]; then
         MEDIA_SERVER="plex"
@@ -563,9 +577,10 @@ gather_config() {
     else
         echo "  1) Plex"
         echo "  2) Jellyfin"
+        echo "  3) Silo (Android TV client and built-in requests)"
         echo ""
         while true; do
-            read -rp "  Choose your media server [1/2]: " media_choice
+            read -rp "  Choose your media server [1/2/3]: " media_choice
             case "$media_choice" in
                 1)
                     MEDIA_SERVER="plex"
@@ -575,15 +590,23 @@ gather_config() {
                     MEDIA_SERVER="jellyfin"
                     break
                     ;;
-                *) log_error "Please enter 1 or 2." ;;
+                3)
+                    MEDIA_SERVER="silo"
+                    break
+                    ;;
+                *) log_error "Please enter 1, 2, or 3." ;;
             esac
         done
     fi
 
     # Validate media server choice
-    if [[ "$MEDIA_SERVER" != "plex" && "$MEDIA_SERVER" != "jellyfin" ]]; then
+    if [[ "$MEDIA_SERVER" != "plex" && "$MEDIA_SERVER" != "jellyfin" && "$MEDIA_SERVER" != "silo" ]]; then
         log_warn "Invalid media server '${MEDIA_SERVER}'. Defaulting to plex."
         MEDIA_SERVER="plex"
+    fi
+    if [[ "${TORBOX_ENABLE_SILO:-}" == "false" && "$MEDIA_SERVER" == "silo" ]]; then
+        log_warn "Silo was disabled but no Plex/Jellyfin profile was found; defaulting to Plex."
+        MEDIA_SERVER=plex
     fi
 
     PLEX_CLAIM="${TORBOX_PLEX_CLAIM:-}"
@@ -599,6 +622,20 @@ gather_config() {
         log_error "Invalid Plex claim token format. Tokens start with 'claim-' followed by alphanumeric characters."
         log_error "Please copy it directly from https://www.plex.tv/claim/"
         exit 1
+    fi
+
+    SILO_ENABLED=false
+    if [[ "$MEDIA_SERVER" == "silo" || "${TORBOX_ENABLE_SILO:-}" == "true" || ("${EXISTING_COMPOSE_PROFILES:-}" == *silo* && "${TORBOX_ENABLE_SILO:-}" != "false") ]]; then
+        SILO_ENABLED=true
+        SILO_GPU="${TORBOX_SILO_GPU:-${EXISTING_SILO_GPU:-dri}}"
+        SILO_HTTP_PORT="${TORBOX_SILO_HTTP_PORT:-${EXISTING_SILO_HTTP_PORT:-8090}}"
+        SILO_JF_PORT="${TORBOX_SILO_JF_PORT:-${EXISTING_SILO_JF_PORT:-8097}}"
+        SILO_ABS_PORT="${TORBOX_SILO_ABS_PORT:-${EXISTING_SILO_ABS_PORT:-13379}}"
+        export TORBOX_SILO_GPU="$SILO_GPU"
+        if [[ "$DRY_RUN" != "true" ]]; then
+            silo_check_host
+        fi
+        log_info "Silo enabled with GPU mode: ${SILO_GPU}."
     fi
 
     echo ""
@@ -767,6 +804,12 @@ gather_config() {
     if [[ -n "${TORBOX_HW_ACCEL:-}" ]]; then
         HW_ACCEL="${TORBOX_HW_ACCEL}"
         log_info "Using hardware acceleration from TORBOX_HW_ACCEL env var: ${HW_ACCEL}"
+    elif [[ "${MEDIA_SERVER}" == "silo" ]]; then
+        # Silo receives its own Intel/AMD device overlay. Do not probe or try
+        # to install NVIDIA tooling for a Silo-only deployment; TORBOX_SILO_GPU
+        # is the authoritative Silo acceleration setting.
+        HW_ACCEL="none"
+        log_info "Silo-only deployment: using Silo's GPU setting (${SILO_GPU:-dri})."
     else
         local detected_intel=false detected_amd=false detected_nvidia=false
         # Distinguish Intel vs AMD GPUs by inspecting the render-node driver / PCI vendor.
@@ -1003,8 +1046,11 @@ create_directories() {
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
         mkdir -p "${CONFIG_DIR}/plex"
-    else
+    elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
         mkdir -p "${CONFIG_DIR}/jellyfin"
+    fi
+    if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+        mkdir -p "${CONFIG_DIR}/silo" "${INSTALL_DIR}/silo-work"/{transcode,download-artifacts}
     fi
 
     # Restore restrictive umask for subsequent file creation
@@ -1227,9 +1273,9 @@ generate_env_file() {
     log_step "Generating environment file..."
 
     # Set the compose profile based on media server choice
-    local compose_profile="plex"
-    if [[ "${MEDIA_SERVER}" == "jellyfin" ]]; then
-        compose_profile="jellyfin"
+    local compose_profile="${MEDIA_SERVER}"
+    if [[ "${SILO_ENABLED:-false}" == "true" && "${compose_profile}" != "silo" ]]; then
+        compose_profile+=",silo"
     fi
 
     cat >"${ENV_FILE}" <<ENV_EOF
@@ -1266,6 +1312,22 @@ PROWLARR_API_KEY="${PROWLARR_API_KEY}"
 DECYPHARR_USER="${DECYPHARR_USER:-torbox}"
 DECYPHARR_PASS="${DECYPHARR_PASS:-}"
 ENV_EOF
+
+    if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+        {
+            echo ""
+            echo "# Silo (generated once; do not rotate for an existing database)"
+            [[ -n "${EXISTING_SILO_SECRET_KEY:-}" ]] && echo "SILO_SECRET_KEY=\"${EXISTING_SILO_SECRET_KEY}\""
+            echo "SILO_PUID=\"${EXISTING_SILO_PUID:-}\""
+            echo "SILO_PGID=\"${EXISTING_SILO_PGID:-}\""
+            echo "SILO_GPU=\"${SILO_GPU:-dri}\""
+            echo "SILO_HTTP_PORT=\"${SILO_HTTP_PORT:-8090}\""
+            echo "SILO_JF_PORT=\"${SILO_JF_PORT:-8097}\""
+            echo "SILO_ABS_PORT=\"${SILO_ABS_PORT:-13379}\""
+            [[ -n "${EXISTING_SILO_WORK_DIR:-}" ]] && echo "SILO_WORK_DIR=\"${EXISTING_SILO_WORK_DIR}\""
+            [[ -n "${EXISTING_SILO_OMNIBUS_IMAGE:-}" ]] && echo "SILO_OMNIBUS_IMAGE=\"${EXISTING_SILO_OMNIBUS_IMAGE}\""
+        } >>"${ENV_FILE}"
+    fi
 
     # Preserve existing admin credentials if this is a re-run, or write newly generated ones on fresh install
     # Check each service independently to avoid losing credentials if only some exist
@@ -1392,6 +1454,12 @@ services:
               capabilities: [gpu]
 HW_OVERRIDE
         log_info "Hardware acceleration override: NVIDIA GPU."
+    fi
+
+    if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+        silo_prepare "${INSTALL_DIR}" "${SCRIPT_DIR}"
+        cp "${SCRIPT_DIR}/backup-silo.sh" "${INSTALL_DIR}/backup-silo.sh"
+        chmod 700 "${INSTALL_DIR}/backup-silo.sh"
     fi
 
     chmod 600 "${COMPOSE_FILE}"
@@ -2314,6 +2382,10 @@ configure_arrs() {
 # ============================================================================
 
 configure_seerr() {
+    if [[ "${MEDIA_SERVER}" == "silo" ]]; then
+        log_info "Silo selected; configure requests in Silo instead of Seerr's media-server wizard."
+        return 0
+    fi
     log_step "Auto-configuring Seerr..."
     local attempt
     for ((attempt = 0; attempt < 20; attempt++)); do
@@ -2648,8 +2720,11 @@ print_post_install() {
             echo -e "  ${GREEN}✓${NC} Sonarr Plex notification (instant library updates)"
             echo -e "  ${GREEN}✓${NC} Plex libraries (Movies + TV Shows)"
             echo -e "  ${YELLOW}⚠${NC} Seerr Plex server (requires setup wizard completion)"
-        else
+        elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
             echo -e "  ${YELLOW}⚠${NC} Seerr Jellyfin server (requires setup wizard completion)"
+        else
+            echo -e "  ${GREEN}✓${NC} Silo media server and read-only TorBox libraries"
+            echo -e "  ${YELLOW}⚠${NC} Silo Requests plugin and Android TV account (configure in Silo admin)"
         fi
         echo ""
     fi
@@ -2762,13 +2837,20 @@ print_post_install() {
             echo "     - Movies: /data/media/movies"
             echo "     - TV Shows: /data/media/tv"
         fi
-    else
+    elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
         echo -e "${CYAN}5. Jellyfin${NC}"
         echo "   • Open http://localhost:8096"
         echo "   • Complete initial setup wizard"
         echo "   • Add libraries:"
         echo "     - Movies: /data/media/movies"
         echo "     - TV Shows: /data/media/tv"
+    else
+        echo -e "${CYAN}5. Silo${NC}"
+        echo "   • Open http://localhost:${SILO_HTTP_PORT:-8090}"
+        echo "   • Create the Silo admin account and add /data/media/movies and /data/media/tv"
+        echo "   • Set Admin → Playback → Hardware acceleration to Auto"
+        echo "   • Install the approved Sonarr/Radarr Requests plugin for discovery"
+        echo "   • Install the official Silo Android TV beta and connect it to this URL"
     fi
 
     echo ""
@@ -2779,10 +2861,13 @@ print_post_install() {
             echo "   • Sign in with your Plex account"
             echo -e "   • ${GREEN}Setup wizard needs to be completed first${NC}"
             echo -e "   • ${GREEN}Then Radarr & Sonarr connections will be configured automatically${NC}"
-        else
+        elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
             echo "   • Sign in and connect to Jellyfin"
             echo -e "   • ${GREEN}Setup wizard needs to be completed first${NC}"
             echo -e "   • ${GREEN}Then Jellyfin server will be configured automatically${NC}"
+        else
+            echo "   • Silo handles discovery and requests directly; Seerr setup is optional"
+            echo "   • See docs/SILO.md for the approved Requests plugin and Android TV app"
         fi
     else
         echo -e "${CYAN}6. Seerr${NC}"
@@ -2790,8 +2875,10 @@ print_post_install() {
         if [[ "$MEDIA_SERVER" == "plex" ]]; then
             echo "   • Sign in with your Plex account"
             echo -e "   • Connect to Plex using: ${YELLOW}http://plex:32400${NC}"
-        else
+        elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
             echo "   • Sign in and connect to Jellyfin (http://jellyfin:8096)"
+        else
+            echo "   • Silo is the selected media server; configure Requests in Silo"
         fi
         echo "   • Add Radarr & Sonarr servers"
         echo "     - Radarr: http://radarr:7878 + API key: $(mask_key "${RADARR_API_KEY}")"
@@ -2871,6 +2958,15 @@ EXISTING_SONARR_ADMIN_PASS=""
 EXISTING_PROWLARR_ADMIN_USER=""
 EXISTING_PROWLARR_ADMIN_PASS=""
 EXISTING_COMPOSE_PROFILES=""
+EXISTING_SILO_SECRET_KEY=""
+EXISTING_SILO_PUID=""
+EXISTING_SILO_PGID=""
+EXISTING_SILO_GPU=""
+EXISTING_SILO_HTTP_PORT=""
+EXISTING_SILO_JF_PORT=""
+EXISTING_SILO_ABS_PORT=""
+EXISTING_SILO_WORK_DIR=""
+EXISTING_SILO_OMNIBUS_IMAGE=""
 
 check_existing_installation() {
     if [[ -f "${SETUP_COMPLETE_FILE}" ]]; then
@@ -2907,6 +3003,15 @@ check_existing_installation() {
         EXISTING_PROWLARR_API_KEY="$(env_val PROWLARR_API_KEY)" || true
         EXISTING_TORBOX_API_KEY="$(env_val TORBOX_API_KEY)" || true
         EXISTING_COMPOSE_PROFILES="$(env_val COMPOSE_PROFILES)" || true
+        EXISTING_SILO_SECRET_KEY="$(env_val SILO_SECRET_KEY)" || true
+        EXISTING_SILO_PUID="$(env_val SILO_PUID)" || true
+        EXISTING_SILO_PGID="$(env_val SILO_PGID)" || true
+        EXISTING_SILO_GPU="$(env_val SILO_GPU)" || true
+        EXISTING_SILO_HTTP_PORT="$(env_val SILO_HTTP_PORT)" || true
+        EXISTING_SILO_JF_PORT="$(env_val SILO_JF_PORT)" || true
+        EXISTING_SILO_ABS_PORT="$(env_val SILO_ABS_PORT)" || true
+        EXISTING_SILO_WORK_DIR="$(env_val SILO_WORK_DIR)" || true
+        EXISTING_SILO_OMNIBUS_IMAGE="$(env_val SILO_OMNIBUS_IMAGE)" || true
 
         # Extract existing admin credentials
         EXISTING_RADARR_ADMIN_USER="$(env_val RADARR_ADMIN_USER)" || true
@@ -2966,6 +3071,15 @@ check_existing_installation() {
             EXISTING_PROWLARR_ADMIN_USER=$(grep '^PROWLARR_ADMIN_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_PROWLARR_ADMIN_PASS=$(grep '^PROWLARR_ADMIN_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_COMPOSE_PROFILES=$(grep '^COMPOSE_PROFILES=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_SECRET_KEY=$(grep '^SILO_SECRET_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_PUID=$(grep '^SILO_PUID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_PGID=$(grep '^SILO_PGID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_GPU=$(grep '^SILO_GPU=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_HTTP_PORT=$(grep '^SILO_HTTP_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_JF_PORT=$(grep '^SILO_JF_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_ABS_PORT=$(grep '^SILO_ABS_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_WORK_DIR=$(grep '^SILO_WORK_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_OMNIBUS_IMAGE=$(grep '^SILO_OMNIBUS_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             DECYPHARR_USER=$(grep "^DECYPHARR_USER=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
             DECYPHARR_PASS=$(grep "^DECYPHARR_PASS=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
         fi
@@ -3048,7 +3162,9 @@ main() {
                 echo ""
                 echo "Environment variables for non-interactive mode:"
                 echo "  TORBOX_API_KEY        TorBox API key (required)"
-                echo "  TORBOX_MEDIA_SERVER   'plex' or 'jellyfin' (default: plex)"
+                echo "  TORBOX_MEDIA_SERVER   'plex', 'jellyfin', or 'silo' (default: plex)"
+                echo "  TORBOX_ENABLE_SILO    'true' adds Silo alongside Plex/Jellyfin"
+                echo "  TORBOX_SILO_GPU       'dri' (default) or 'none' for CPU-only Silo"
                 echo "  TORBOX_PLEX_CLAIM     Plex claim token (optional)"
                 echo "  TORBOX_MOUNT_DIR      Mount directory (default: /mnt/torbox-media)"
                 echo "  TORBOX_HW_ACCEL       'intel', 'nvidia', 'amd', or 'none' (auto-detects if unset)"
@@ -3063,17 +3179,6 @@ main() {
                 ;;
         esac
     done
-
-    # Full setup rewrites .env and hardware overrides. Preserve the add-on by
-    # directing existing Silo installations to the non-destructive entry points.
-    if [[ -f "${ENV_FILE}" && "${SYNC_AUTH_ONLY:-false}" != true ]]; then
-        case ",$(env_val COMPOSE_PROFILES)," in
-            *,silo,*)
-                log_error "Silo is installed. Use --refresh-management, --add-silo, or repair-install.sh; full setup would rewrite its deployment."
-                return 1
-                ;;
-        esac
-    fi
 
     # Warn if running as root (PUID/PGID would default to 0:0, usually undesirable)
     if [[ $EUID -eq 0 ]]; then
@@ -3122,8 +3227,11 @@ main() {
         echo "     mkdir -p ${DATA_DIR}/{media/{movies,tv},downloads/{radarr,sonarr}}"
         if [[ "$MEDIA_SERVER" == "plex" ]]; then
             echo "     mkdir -p ${CONFIG_DIR}/plex"
-        else
+        elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
             echo "     mkdir -p ${CONFIG_DIR}/jellyfin"
+        fi
+        if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+            echo "     mkdir -p ${CONFIG_DIR}/silo ${INSTALL_DIR}/silo-work/{transcode,download-artifacts}"
         fi
         echo "     sudo mkdir -p ${MOUNT_DIR}"
         echo ""

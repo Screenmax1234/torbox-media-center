@@ -4,7 +4,9 @@ This add-on follows [Silo's installation guide](https://siloserver.org/docs/inst
 and [transcoding guide](https://siloserver.org/docs/playback). It adds a separate
 Silo server to your existing TorBox stack. Plex/Jellyfin, Seerr, the *arrs,
 Decypharr, their image versions, credentials and configuration stay in place.
-Adding Silo starts only `silo`; it does not recreate the other containers.
+The central installer can create the complete stack in one run, or add Silo
+to the existing stack while preserving the other containers. The compatibility
+add-on starts only `silo`.
 
 Silo and its Android TV app are prerelease software. The image is pinned to
 the multi-platform digest checked on 2026-11-01, rather than a moving `latest`
@@ -14,11 +16,23 @@ in TorBox, but Silo's temporary playback/download output can be large.
 
 ## Install
 
-You need a working, running installation with healthy Decypharr, Docker
-Compose **2.24 or newer**, and permission to use Docker. For a new host, run
-the normal installer with Plex or Jellyfin first, then add Silo. Silo is an
-add-on, not a third choice in the original first-install wizard. The Windows
-PowerShell installer does not install Silo.
+The main Linux installer is the recommended path. For a new Silo-first server:
+
+```bash
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="silo" bash setup.sh --yes
+```
+
+To keep Plex or Jellyfin and add Silo in one central rerun:
+
+```bash
+TORBOX_ENABLE_SILO=true TORBOX_SILO_GPU=dri bash setup.sh --yes
+```
+
+The installer preserves existing credentials, databases and media-server
+profiles. It requires Docker Compose **2.24 or newer** and permission to use
+Docker. The Windows PowerShell installer remains Plex/Jellyfin-only.
+The older `add-silo.sh` command is retained as a compatibility path when you
+want to add only Silo without rerunning the full stack.
 
 For Intel Quick Sync or AMD VA-API, make sure the **Linux host running Docker**
 has a render device before running the add-on:
@@ -28,12 +42,11 @@ ls -l /dev/dri
 docker compose version
 cd /root/torbox-media-center
 git pull --ff-only
-bash add-silo.sh /root/torbox-media-center/torbox-media-server
+TORBOX_API_KEY="your-existing-key" TORBOX_ENABLE_SILO=true bash setup.sh --yes
 ```
 
 Use your own checkout/install paths if different. The equivalent default-path
-entry point is `bash setup.sh --add-silo`. No full installer rerun or
-`repair-install.sh` is needed just to add Silo. If Git refuses a pull because
+entry point is `bash setup.sh --add-silo` for the compatibility path. No separate installer is needed. If Git refuses a pull because
 of local changes, save/review those changes first; do not reset your working
 configuration.
 
@@ -43,7 +56,7 @@ device is present, instead of silently running on the CPU. For an explicit
 CPU-only trial:
 
 ```bash
-TORBOX_SILO_GPU=none bash add-silo.sh /root/torbox-media-center/torbox-media-server
+TORBOX_ENABLE_SILO=true TORBOX_SILO_GPU=none bash setup.sh --yes
 ```
 
 That choice is saved. To switch back later, rerun with `TORBOX_SILO_GPU=dri`.
@@ -82,7 +95,7 @@ curl --fail http://localhost:8090/api/v1/ready
 The initial database migration can take several minutes (the health check
 allows 20 minutes). Do not repeatedly restart Silo while it initializes. A
 ready server returns `{"status":"ok"}`. If port 8090 is already occupied, add
-`SILO_HTTP_PORT=8091` to the **installed** `.env` and rerun `add-silo.sh`;
+`SILO_HTTP_PORT=8091` to the **installed** `.env` and rerun `setup.sh --add-silo`;
 `./manage.sh urls` uses the configured port. `SILO_JF_PORT` and `SILO_ABS_PORT`
 similarly change the compatibility host ports without changing container ports.
 
@@ -195,7 +208,7 @@ produce every filesystem notification; the daily full scan is a fallback.
 `restart`, `down`, and `update` understand the additional profile. `pull` only
 pulls published images; Decypharr is still built locally. The general `update`
 command updates/recreates the **whole stack**, as before. To apply only Silo
-changes, rerun `add-silo.sh` instead.
+changes, rerun the central `setup.sh --add-silo` command instead.
 
 The installed `.env` adds `silo` to `COMPOSE_PROFILES` and lists the base file,
 any existing hardware override, and Silo fragments in `COMPOSE_FILE`. Preserve

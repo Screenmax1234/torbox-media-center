@@ -23,7 +23,7 @@ A single script that installs, configures, and runs a complete debrid-powered me
 ```bash
 git clone https://github.com/Screenmax1234/torbox-media-center.git
 cd torbox-media-center
-bash setup-fixed.sh
+bash setup.sh
 ```
 
 For unattended installs:
@@ -32,26 +32,36 @@ For unattended installs:
 TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" bash setup.sh --yes
 ```
 
-### Optional Silo server (Linux, including Android TV)
+### Silo server (Linux, including Android TV)
 
-To try Silo alongside a working Plex/Jellyfin stack, update this checkout and run:
+Silo is a first-class media-server choice in the main installer. For a new
+installation, use one command:
 
 ```bash
-bash add-silo.sh /root/torbox-media-center/torbox-media-server
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="silo" bash setup.sh --yes
 ```
 
-Use your actual installation path. This starts only Silo, preserving the current
-containers and their settings. Intel/AMD **`/dev/dri` GPU passthrough is included
-by default**, and Silo opens at `http://SERVER-IP:8090`. It needs Docker Compose
-2.24+ and a render device on the Docker host; CPU-only trials are an explicit
-option. Silo is prerelease software, installed from a fixed image digest.
+The installer creates the full TorBox/*arr stack, Silo's persistent database,
+read-only TorBox media mounts, and `/dev/dri` passthrough for Intel/AMD
+transcoding. Silo opens at `http://SERVER-IP:8090`. It requires Docker Compose
+2.24+ and a render device; set `TORBOX_SILO_GPU=none` only for a CPU-only trial.
 
-Follow the [Silo setup guide](docs/SILO.md) for libraries, hardware transcoding,
-Android TV discovery/requests, import scanning, ports, permissions and backups.
-Silo is a separate add-on after normal first-time setup; it is not a replacement
-for the existing install wizard. The equivalent default-path option is
-`bash setup.sh --add-silo`. Its database needs the permanent key saved in the
-installed `.env`; never replace that key or restore the database while running.
+To add Silo to an existing working Plex/Jellyfin installation, use the same
+central script and preserve the current media server:
+
+```bash
+TORBOX_ENABLE_SILO=true TORBOX_SILO_GPU=dri bash setup.sh --yes
+```
+
+The rerun preserves API keys, credentials, Silo's encryption key and database,
+and the existing media server. It validates the new Compose files before
+restarting the stack. The older `add-silo.sh` command remains as a backwards
+compatible safe add-on for installations that should not run a full update.
+
+Read [the Silo guide](docs/SILO.md) for Android TV discovery and requests,
+transcoding verification, automatic import scanning, ports and backups. Silo is
+prerelease software; its database key must be saved separately and never
+regenerated.
 
 ### Repair an older installation
 

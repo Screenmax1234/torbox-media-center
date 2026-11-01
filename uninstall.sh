@@ -112,13 +112,13 @@ fi
 if [[ -f "${ENV_FILE}" && -f "${COMPOSE_FILE}" ]]; then
     compose_cmd down --remove-orphans 2>/dev/null || {
         log_warn "Docker compose down failed. Attempting manual cleanup..."
-        for svc in decypharr prowlarr byparr radarr sonarr seerr plex jellyfin; do
+        for svc in decypharr prowlarr byparr radarr sonarr seerr plex jellyfin silo; do
             "${DOCKER_CMD[@]}" rm -f "$svc" 2>/dev/null || true
         done
     }
 else
     log_warn "Missing .env or docker-compose.yml. Skipping compose down."
-    for svc in decypharr prowlarr byparr radarr sonarr seerr plex jellyfin; do
+    for svc in decypharr prowlarr byparr radarr sonarr seerr plex jellyfin silo; do
         "${DOCKER_CMD[@]}" rm -f "$svc" 2>/dev/null || true
     done
 fi

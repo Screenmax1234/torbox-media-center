@@ -450,6 +450,22 @@ else
     fail "README missing manage.sh backup command"
 fi
 
+# 5.7 Silo is a first-class central-installer option and retains GPU support.
+if grep -q "TORBOX_MEDIA_SERVER.*silo" "$SETUP_SCRIPT" &&
+    grep -q "TORBOX_ENABLE_SILO" "$SETUP_SCRIPT" &&
+    grep -q "silo_prepare" "$SETUP_SCRIPT"; then
+    pass "setup.sh exposes Silo selection, add-on mode, and GPU overlay"
+else
+    fail "setup.sh is missing the central Silo installation path"
+fi
+
+# 5.8 Silo documentation is shipped with the installer.
+if [[ -f "${PROJECT_ROOT}/docs/SILO.md" ]] && grep -q 'Android TV' "${PROJECT_ROOT}/docs/SILO.md"; then
+    pass "Silo documentation covers the Android TV path"
+else
+    fail "Silo documentation is missing"
+fi
+
 # ============================================================================
 #  6. MANAGE.SH GENERATION TESTS
 # ============================================================================

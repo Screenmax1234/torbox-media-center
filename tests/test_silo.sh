@@ -77,12 +77,11 @@ urls=$(bash "$install_dir/manage.sh" urls)
 grep -q 'Jellyfin.*8096' <<<"$urls"
 bash "$install_dir/manage.sh" pull >>"$test_dir/output"
 grep -q 'pull prowlarr byparr radarr sonarr seerr jellyfin silo$' "$DOCKER_TEST_LOG"
-if TORBOX_INSTALL_DIR="$install_dir" bash "$PROJECT_ROOT/setup.sh" --yes >"$test_dir/blocked" 2>&1; then
-    echo 'FAIL: full setup was allowed to discard Silo settings' >&2
-    exit 1
-fi
+help=$(bash "$PROJECT_ROOT/setup.sh" --help)
+grep -q "TORBOX_MEDIA_SERVER.*silo" <<<"$help"
+grep -q "TORBOX_ENABLE_SILO" <<<"$help"
 [[ -n $(env_val SILO_SECRET_KEY "$install_dir/.env") ]]
-echo 'PASS: Jellyfin add-on works and full installer refuses to overwrite the Silo deployment'
+echo 'PASS: Jellyfin add-on works and the central installer exposes Silo modes'
 
 fixture pull-failure
 if FAIL_PULL=true bash "$PROJECT_ROOT/add-silo.sh" "$install_dir" >"$test_dir/failure" 2>&1; then
