@@ -115,3 +115,126 @@ silo_prepare() {
     mkdir -p "$config_dir/silo" "$work_dir/transcode" "$work_dir/download-artifacts"
     echo '[INFO] Silo overlays prepared. Save SILO_SECRET_KEY from .env separately in a password manager.'
 }
+
+# Configure the first-run Silo account and the two media libraries through
+# Silo's current native v2 API. The endpoint contracts are part of Silo's
+# source/docs (POST /api/v2/auth/setup and POST /api/v2/libraries). Existing
+# accounts and libraries are detected and left untouched.
+configure_silo() {
+    [[ "${SILO_ENABLED:-false}" == "true" ]] || return 0
+
+    local base="http://localhost:${SILO_HTTP_PORT:-8090}"
+    local setup_status needs_setup token setup_body setup_response setup_code
+    local login_body login_response login_code libraries library_type library_name library_path
+    local existing_count create_body create_response create_code
+
+    if ! command -v jq &>/dev/null; then
+        log_warn "Silo auto-configuration requires jq; finish Silo onboarding and libraries in its web UI."
+        return 1
+    fi
+
+    log_step "Auto-configuring Silo..."
+    # The omnibus image may run PostgreSQL migrations before it is ready. Keep
+    # this aligned with the Compose healthcheck's 20-minute start period so a
+    # slow first boot does not unnecessarily fall back to manual onboarding.
+    local elapsed=0
+    while [[ $elapsed -lt 1200 ]]; do
+        if curl -sf --connect-timeout 3 --max-time 10 "${base}/api/v1/ready" -o /dev/null 2>/dev/null; then
+            break
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    if [[ $elapsed -ge 1200 ]]; then
+        log_warn "Silo did not become ready within 20 minutes; its web onboarding remains available at ${base}."
+        return 1
+    fi
+
+    setup_status=$(curl -sf --connect-timeout 5 --max-time 15 "${base}/api/v2/system/setup" 2>/dev/null) || true
+    if [[ -z "$setup_status" ]]; then
+        # Older prerelease images expose the same setup state on the v1 bridge.
+        setup_status=$(curl -sf --connect-timeout 5 --max-time 15 "${base}/api/v1/auth/setup" 2>/dev/null) || true
+    fi
+    needs_setup=$(echo "$setup_status" | jq -r '.needs_setup // .needsSetup // empty' 2>/dev/null) || true
+    if [[ "$needs_setup" != true && "$needs_setup" != false ]]; then
+        log_warn "Could not read Silo setup status; finish onboarding at ${base} and rerun setup.sh."
+        return 1
+    fi
+
+    if [[ "$needs_setup" == true ]]; then
+        setup_body=$(jq -cn \
+            --arg username "${SILO_ADMIN_USER:-admin}" \
+            --arg email "${SILO_ADMIN_EMAIL:-admin@torbox.local}" \
+            --arg password "${SILO_ADMIN_PASS:-}" \
+            '{username:$username,email:$email,password:$password,create_default_profile:true}')
+        setup_response=$(curl -sS --connect-timeout 5 --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -X POST "${base}/api/v2/auth/setup" -d "$setup_body" \
+            -w $'\n%{http_code}' 2>/dev/null) || true
+        setup_code="${setup_response##*$'\n'}"
+        setup_response="${setup_response%$'\n'*}"
+        token=$(echo "$setup_response" | jq -r '.access_token // empty' 2>/dev/null) || true
+        if [[ "$setup_code" != 201 || -z "$token" ]]; then
+            log_warn "Silo first-admin setup did not complete (HTTP ${setup_code:-unknown})."
+            log_warn "Open ${base}, complete onboarding, then rerun setup.sh to retry library setup."
+            return 1
+        fi
+        log_info "Silo admin account created (username: ${SILO_ADMIN_USER:-admin})."
+    else
+        login_body=$(jq -cn \
+            --arg username "${SILO_ADMIN_USER:-admin}" \
+            --arg password "${SILO_ADMIN_PASS:-}" \
+            '{username:$username,password:$password}')
+        login_response=$(curl -sS --connect-timeout 5 --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -X POST "${base}/api/v2/auth/login" -d "$login_body" \
+            -w $'\n%{http_code}' 2>/dev/null) || true
+        login_code="${login_response##*$'\n'}"
+        login_response="${login_response%$'\n'*}"
+        token=$(echo "$login_response" | jq -r '.access_token // empty' 2>/dev/null) || true
+        if [[ "$login_code" != 200 || -z "$token" ]]; then
+            log_warn "Silo already has an account, but the saved installer credentials did not authenticate."
+            log_warn "Log in at ${base} manually, or set TORBOX_SILO_ADMIN_USER and TORBOX_SILO_ADMIN_PASS, then rerun setup.sh."
+            return 1
+        fi
+        log_info "Silo admin account already exists; preserved it."
+    fi
+
+    libraries=$(curl -sf --connect-timeout 5 --max-time 20 \
+        -H "Authorization: Bearer ${token}" "${base}/api/v2/libraries" 2>/dev/null) || true
+    if [[ -z "$libraries" ]]; then
+        log_warn "Silo libraries could not be read with the admin session; finish them in the web UI."
+        return 1
+    fi
+
+    while IFS=$'\t' read -r library_type library_name library_path; do
+        existing_count=$(echo "$libraries" | jq --arg type "$library_type" --arg path "$library_path" \
+            '[.items[]? | select(.type == $type and ((.paths // []) | index($path) != null))] | length' 2>/dev/null) || existing_count=0
+        if [[ "$existing_count" -gt 0 ]]; then
+            log_info "Silo library already exists: ${library_name}."
+            continue
+        fi
+        create_body=$(jq -cn --arg type "$library_type" --arg name "$library_name" --arg path "$library_path" \
+            '{paths:[$path],type:$type,name:$name,metadata_language:"en",realtime_monitoring:true}')
+        create_response=$(curl -sS --connect-timeout 5 --max-time 45 \
+            -H 'Content-Type: application/json' -H "Authorization: Bearer ${token}" \
+            -X POST "${base}/api/v2/libraries" -d "$create_body" \
+            -w $'\n%{http_code}' 2>/dev/null) || true
+        create_code="${create_response##*$'\n'}"
+        create_response="${create_response%$'\n'*}"
+        if [[ "$create_code" == 201 ]]; then
+            log_info "Silo library created: ${library_name} (${library_path})."
+            libraries=$(printf '%s' "$libraries" | jq --arg type "$library_type" --arg name "$library_name" --arg path "$library_path" \
+                '.items += [{type:$type,name:$name,paths:[$path]}]' 2>/dev/null) || true
+        else
+            log_warn "Silo could not create ${library_name} (HTTP ${create_code:-unknown}); configure it at ${base}."
+            return 1
+        fi
+    done <<'LIBRARIES'
+movies	Movies	/data/media/movies
+series	TV Shows	/data/media/tv
+LIBRARIES
+
+    log_info "Silo account and media libraries are configured."
+    return 0
+}

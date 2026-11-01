@@ -577,7 +577,7 @@ gather_config() {
     else
         echo "  1) Plex"
         echo "  2) Jellyfin"
-        echo "  3) Silo (Android TV client and built-in requests)"
+        echo "  3) Silo (Android TV client and request plugin support)"
         echo ""
         while true; do
             read -rp "  Choose your media server [1/2/3]: " media_choice
@@ -796,6 +796,31 @@ gather_config() {
             exit 1
         fi
     done
+
+    if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+        if [[ -n "${EXISTING_SILO_ADMIN_USER:-}" ]]; then
+            SILO_ADMIN_USER="$EXISTING_SILO_ADMIN_USER"
+        else
+            SILO_ADMIN_USER="${TORBOX_SILO_ADMIN_USER:-admin}"
+        fi
+        if [[ -n "${EXISTING_SILO_ADMIN_EMAIL:-}" ]]; then
+            SILO_ADMIN_EMAIL="$EXISTING_SILO_ADMIN_EMAIL"
+        else
+            SILO_ADMIN_EMAIL="${TORBOX_SILO_ADMIN_EMAIL:-admin@torbox.local}"
+        fi
+        if [[ -n "${EXISTING_SILO_ADMIN_PASS:-}" ]]; then
+            SILO_ADMIN_PASS="$EXISTING_SILO_ADMIN_PASS"
+        elif [[ -n "${TORBOX_SILO_ADMIN_PASS:-}" ]]; then
+            SILO_ADMIN_PASS="$TORBOX_SILO_ADMIN_PASS"
+        else
+            SILO_ADMIN_PASS="$(_gen_admin_pass)"
+        fi
+        if [[ -z "$SILO_ADMIN_USER" || -z "$SILO_ADMIN_EMAIL" || ${#SILO_ADMIN_PASS} -lt 8 ]]; then
+            log_error "Silo admin credentials are incomplete. Set TORBOX_SILO_ADMIN_USER, TORBOX_SILO_ADMIN_EMAIL, and TORBOX_SILO_ADMIN_PASS (8+ characters)."
+            exit 1
+        fi
+        log_info "Silo admin credentials prepared; they are stored in the private .env file."
+    fi
 
     echo ""
 
@@ -1324,6 +1349,9 @@ ENV_EOF
             echo "SILO_HTTP_PORT=\"${SILO_HTTP_PORT:-8090}\""
             echo "SILO_JF_PORT=\"${SILO_JF_PORT:-8097}\""
             echo "SILO_ABS_PORT=\"${SILO_ABS_PORT:-13379}\""
+            echo "SILO_ADMIN_USER=\"${SILO_ADMIN_USER:-admin}\""
+            echo "SILO_ADMIN_EMAIL=\"${SILO_ADMIN_EMAIL:-admin@torbox.local}\""
+            echo "SILO_ADMIN_PASS=\"${SILO_ADMIN_PASS:-}\""
             [[ -n "${EXISTING_SILO_WORK_DIR:-}" ]] && echo "SILO_WORK_DIR=\"${EXISTING_SILO_WORK_DIR}\""
             [[ -n "${EXISTING_SILO_OMNIBUS_IMAGE:-}" ]] && echo "SILO_OMNIBUS_IMAGE=\"${EXISTING_SILO_OMNIBUS_IMAGE}\""
         } >>"${ENV_FILE}"
@@ -1682,6 +1710,10 @@ cmd_keys() {
         echo -e "  ${BOLD}Radarr${NC}    user: $(env_val RADARR_ADMIN_USER)  pass: $(mask_val "${_radarr_pass}")"
         echo -e "  ${BOLD}Sonarr${NC}    user: $(env_val SONARR_ADMIN_USER)  pass: $(mask_val "${_sonarr_pass}")"
         echo -e "  ${BOLD}Prowlarr${NC}  user: $(env_val PROWLARR_ADMIN_USER)  pass: $(mask_val "${_prowlarr_pass}")"
+    fi
+    if [[ -n "$(env_val SILO_ADMIN_PASS)" ]]; then
+        echo ""
+        echo -e "  ${BOLD}Silo${NC}       user: $(env_val SILO_ADMIN_USER)  email: $(env_val SILO_ADMIN_EMAIL)  pass: $(mask_val "$(env_val SILO_ADMIN_PASS)")"
     fi
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
@@ -2337,6 +2369,10 @@ configure_arrs() {
     echo ""
     local _failed=0
 
+    if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
+        configure_silo || _failed=$((_failed + 1))
+    fi
+
     configure_seerr || _failed=$((_failed + 1))
 
     # Wait for Plex to be claimed before configuring its import notifications.
@@ -2724,6 +2760,11 @@ print_post_install() {
             echo -e "  ${YELLOW}⚠${NC} Seerr Jellyfin server (requires setup wizard completion)"
         else
             echo -e "  ${GREEN}✓${NC} Silo media server and read-only TorBox libraries"
+            echo -e "  ${GREEN}✓${NC} Silo admin account and Movies/TV libraries"
+            echo -e "  ${YELLOW}⚠${NC} Silo Requests plugin and Android TV account (configure in Silo admin)"
+        fi
+        if [[ "${SILO_ENABLED:-false}" == "true" && "$MEDIA_SERVER" != "silo" ]]; then
+            echo -e "  ${GREEN}✓${NC} Silo admin account and Movies/TV libraries"
             echo -e "  ${YELLOW}⚠${NC} Silo Requests plugin and Android TV account (configure in Silo admin)"
         fi
         echo ""
@@ -2847,10 +2888,28 @@ print_post_install() {
     else
         echo -e "${CYAN}5. Silo${NC}"
         echo "   • Open http://localhost:${SILO_HTTP_PORT:-8090}"
-        echo "   • Create the Silo admin account and add /data/media/movies and /data/media/tv"
+        if [[ "$SERVICES_STARTED" == "true" && -n "${SILO_ADMIN_PASS:-}" ]]; then
+            echo -e "   • ${GREEN}Admin account and Movies/TV libraries auto-configured ✓${NC}"
+            echo -e "   •   Username: ${BOLD}${SILO_ADMIN_USER}${NC}"
+            echo -e "   •   Password: ${BOLD}${SILO_ADMIN_PASS}${NC}"
+        else
+            echo "   • Create the Silo admin account and add /data/media/movies and /data/media/tv"
+        fi
         echo "   • Set Admin → Playback → Hardware acceleration to Auto"
         echo "   • Install the approved Sonarr/Radarr Requests plugin for discovery"
         echo "   • Install the official Silo Android TV beta and connect it to this URL"
+    fi
+    if [[ "${SILO_ENABLED:-false}" == "true" && "$MEDIA_SERVER" != "silo" ]]; then
+        echo ""
+        echo -e "${CYAN}Silo add-on${NC}"
+        echo "   • Open http://localhost:${SILO_HTTP_PORT:-8090}"
+        if [[ "$SERVICES_STARTED" == "true" && -n "${SILO_ADMIN_PASS:-}" ]]; then
+            echo -e "   • ${GREEN}Admin account and Movies/TV libraries auto-configured ✓${NC}"
+            echo -e "   •   Username: ${BOLD}${SILO_ADMIN_USER}${NC}"
+            echo -e "   •   Password: ${BOLD}${SILO_ADMIN_PASS}${NC}"
+        fi
+        echo "   • Enable hardware acceleration in Admin → Playback"
+        echo "   • Install the approved Requests plugin for Android TV discovery"
     fi
 
     echo ""
@@ -2967,6 +3026,9 @@ EXISTING_SILO_JF_PORT=""
 EXISTING_SILO_ABS_PORT=""
 EXISTING_SILO_WORK_DIR=""
 EXISTING_SILO_OMNIBUS_IMAGE=""
+EXISTING_SILO_ADMIN_USER=""
+EXISTING_SILO_ADMIN_EMAIL=""
+EXISTING_SILO_ADMIN_PASS=""
 
 check_existing_installation() {
     if [[ -f "${SETUP_COMPLETE_FILE}" ]]; then
@@ -3012,6 +3074,9 @@ check_existing_installation() {
         EXISTING_SILO_ABS_PORT="$(env_val SILO_ABS_PORT)" || true
         EXISTING_SILO_WORK_DIR="$(env_val SILO_WORK_DIR)" || true
         EXISTING_SILO_OMNIBUS_IMAGE="$(env_val SILO_OMNIBUS_IMAGE)" || true
+        EXISTING_SILO_ADMIN_USER="$(env_val SILO_ADMIN_USER)" || true
+        EXISTING_SILO_ADMIN_EMAIL="$(env_val SILO_ADMIN_EMAIL)" || true
+        EXISTING_SILO_ADMIN_PASS="$(env_val SILO_ADMIN_PASS)" || true
 
         # Extract existing admin credentials
         EXISTING_RADARR_ADMIN_USER="$(env_val RADARR_ADMIN_USER)" || true
@@ -3080,6 +3145,9 @@ check_existing_installation() {
             EXISTING_SILO_ABS_PORT=$(grep '^SILO_ABS_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_WORK_DIR=$(grep '^SILO_WORK_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_OMNIBUS_IMAGE=$(grep '^SILO_OMNIBUS_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_ADMIN_USER=$(grep '^SILO_ADMIN_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_ADMIN_EMAIL=$(grep '^SILO_ADMIN_EMAIL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SILO_ADMIN_PASS=$(grep '^SILO_ADMIN_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             DECYPHARR_USER=$(grep "^DECYPHARR_USER=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
             DECYPHARR_PASS=$(grep "^DECYPHARR_PASS=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
         fi
@@ -3165,6 +3233,7 @@ main() {
                 echo "  TORBOX_MEDIA_SERVER   'plex', 'jellyfin', or 'silo' (default: plex)"
                 echo "  TORBOX_ENABLE_SILO    'true' adds Silo alongside Plex/Jellyfin"
                 echo "  TORBOX_SILO_GPU       'dri' (default) or 'none' for CPU-only Silo"
+                echo "  TORBOX_SILO_ADMIN_USER/EMAIL/PASS  Optional Silo first-admin values (generated if unset)"
                 echo "  TORBOX_PLEX_CLAIM     Plex claim token (optional)"
                 echo "  TORBOX_MOUNT_DIR      Mount directory (default: /mnt/torbox-media)"
                 echo "  TORBOX_HW_ACCEL       'intel', 'nvidia', 'amd', or 'none' (auto-detects if unset)"

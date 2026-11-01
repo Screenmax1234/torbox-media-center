@@ -45,6 +45,11 @@ The installer creates the full TorBox/*arr stack, Silo's persistent database,
 read-only TorBox media mounts, and `/dev/dri` passthrough for Intel/AMD
 transcoding. Silo opens at `http://SERVER-IP:8090`. It requires Docker Compose
 2.24+ and a render device; set `TORBOX_SILO_GPU=none` only for a CPU-only trial.
+On a fresh Silo database, the installer also creates the admin account and
+Movies/TV libraries through Silo's documented API. The generated credentials
+are printed after setup and can be viewed later with `./manage.sh keys`.
+The Requests plugin and Android TV client are installed/enabled separately in
+Silo's administrator interface, as documented in [docs/SILO.md](docs/SILO.md).
 
 To add Silo to an existing working Plex/Jellyfin installation, use the same
 central script and preserve the current media server:
@@ -272,7 +277,7 @@ To refresh stale Seerr connections or migrate the legacy Decypharr rate limit, u
   (shortcuts) that point to the cloud files
                     │
                     ▼
-  Plex or Jellyfin reads these symlinks and streams the content
+  Plex, Jellyfin, or Silo reads these symlinks and streams the content
   to any device on your network - phone, TV, tablet, computer
 ```
 
@@ -332,6 +337,7 @@ User Request                Search & Automation           Cloud Download
 | **Seerr** | 5055 | Beautiful web UI where you (and your family/friends) can browse and request movies and TV shows. Supports Plex, Jellyfin & Emby. |
 | **Plex** | 32400 | Media server option 1. Streams your library to any device. Requires a free Plex account. |
 | **Jellyfin** | 8096 | Media server option 2 (open-source, no account needed). Streams your library to any device. |
+| **Silo** | 8090 | Optional media server option 3 with native Android TV playback, discovery and request-plugin support. |
 
 From another device, replace `localhost` in these URLs with the server's LAN IP address, such as `http://10.11.12.61:5055`.
 
@@ -699,7 +705,12 @@ The following environment variables can be set before running `bash setup.sh --y
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TORBOX_API_KEY` | *(required)* | Your TorBox API key from [torbox.app/settings](https://torbox.app/settings) |
-| `TORBOX_MEDIA_SERVER` | `plex` | Media server choice: `plex` or `jellyfin` |
+| `TORBOX_MEDIA_SERVER` | `plex` | Media server choice: `plex`, `jellyfin`, or `silo` |
+| `TORBOX_ENABLE_SILO` | `false` | Add Silo alongside the selected Plex/Jellyfin server |
+| `TORBOX_SILO_GPU` | `dri` | Silo acceleration mode: `dri` for Intel/AMD `/dev/dri`, or `none` for CPU-only |
+| `TORBOX_SILO_ADMIN_USER` | `admin` | First Silo administrator username; preserved after creation |
+| `TORBOX_SILO_ADMIN_EMAIL` | `admin@torbox.local` | First Silo administrator email; use a dotted domain |
+| `TORBOX_SILO_ADMIN_PASS` | *(generated)* | First Silo administrator password; saved in the private installed `.env` |
 | `TORBOX_PLEX_CLAIM` | *(empty)* | Plex claim token from [plex.tv/claim](https://www.plex.tv/claim/) |
 | `TORBOX_MOUNT_DIR` | `/mnt/torbox-media` | Custom mount directory for rclone FUSE mount |
 | `TORBOX_HW_ACCEL` | *(auto-detected)* | Hardware acceleration: `none`, `intel`, `amd`, or `nvidia` |

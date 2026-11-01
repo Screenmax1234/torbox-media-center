@@ -99,8 +99,10 @@ ready server returns `{"status":"ok"}`. If port 8090 is already occupied, add
 `./manage.sh urls` uses the configured port. `SILO_JF_PORT` and `SILO_ABS_PORT`
 similarly change the compatibility host ports without changing container ports.
 
-Open Silo in a browser, create its admin account and profile, choose local
-automatic storage, then add:
+The central installer waits for Silo's readiness probe, creates the first admin
+account, and creates these two libraries through the native API. It prints the
+generated password and stores it in the private installed `.env`. Open Silo in
+a browser afterward to confirm the profile and choose local automatic storage:
 
 | Library type | Container folder |
 | --- | --- |
