@@ -32,6 +32,29 @@ For unattended installs:
 TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER="plex" bash setup.sh --yes
 ```
 
+### Optional Silo server (Linux, including Android TV)
+
+To try Silo alongside a working Plex/Jellyfin stack, update this checkout and run:
+
+```bash
+bash add-silo.sh /root/torbox-media-center/torbox-media-server
+```
+
+Use your actual installation path. This starts only Silo, preserving the current
+containers and their settings. Intel/AMD **`/dev/dri` GPU passthrough is included
+by default**, and Silo opens at `http://SERVER-IP:8090`. It needs Docker Compose
+2.24+ and a render device on the Docker host; CPU-only trials are an explicit
+option. Silo is prerelease software, installed from a fixed image digest.
+
+Follow the [Silo setup guide](docs/SILO.md) for libraries, hardware transcoding,
+Android TV discovery/requests, import scanning, ports, permissions and backups.
+Silo is a separate add-on after normal first-time setup; it is not a replacement
+for the existing install wizard. The equivalent default-path option is
+`bash setup.sh --add-silo`. Its database needs the permanent key saved in the
+installed `.env`; never replace that key or restore the database while running.
+
+### Repair an older installation
+
 The repository also includes `setup-fixed.sh`, which uses the same installer
 and adds a repair path for installations created by an older release:
 
@@ -515,6 +538,15 @@ cd torbox-media-server/
 ```
 
 `logs` accepts an optional service name, `shell` requires a service name, `restore` accepts an optional backup directory name, and `keys` accepts the optional `--show-secrets` flag. The generated script uses safe defaults, so `./manage.sh keys` works without a second argument.
+
+With the optional [Silo add-on](docs/SILO.md), `logs silo`, `shell silo`, `urls`
+and image pulls include Silo alongside your original media server. `backup`
+briefly stops Silo to copy its PostgreSQL data, then resumes it. The old
+automatic `restore` is blocked on Silo installs; use the documented cold restore
+procedure instead. `update` still operates on the whole stack; rerun
+`add-silo.sh` to apply only Silo changes. Keep `COMPOSE_FILE` and
+`COMPOSE_PROFILES` in the installed `.env`, and omit a single-file `-f` when
+running Compose manually so the add-on fragments are included.
 
 The source checkout also provides two repair helpers that are intentionally separate from the generated management script:
 

@@ -28,7 +28,7 @@ jobs:
           shfmt --version
 
       - name: Check formatting
-        run: shfmt -d -i 4 -ci setup.sh uninstall.sh diagnose-connections.sh repair-plex.sh lib/ tests/
+        run: shfmt -d -i 4 -ci setup.sh uninstall.sh diagnose-connections.sh repair-plex.sh add-silo.sh backup-silo.sh lib/ tests/
 
   shellcheck:
     name: ShellCheck
@@ -49,7 +49,7 @@ jobs:
         run: shellcheck tests/*.sh
 
       - name: Lint connection diagnostics
-        run: shellcheck diagnose-connections.sh repair-plex.sh lib/seerr.sh lib/plex.sh
+        run: shellcheck diagnose-connections.sh repair-plex.sh add-silo.sh backup-silo.sh lib/seerr.sh lib/plex.sh lib/silo.sh
 
   powershell-lint:
     name: PowerShell Lint
@@ -120,6 +120,12 @@ jobs:
 
       - name: Test generated management commands
         run: bash tests/test_manage_keys.sh
+
+      - name: Test optional Silo lifecycle and preservation
+        run: bash tests/test_silo.sh
+
+      - name: Validate Silo CPU/GPU Compose overlays for both media servers
+        run: python3 tests/test_silo_compose.py
 
       - name: Test authenticated service connections and repair
         run: python3 tests/test_connections.py

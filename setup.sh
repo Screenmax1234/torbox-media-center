@@ -1435,7 +1435,7 @@ generate_management_script() {
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
+BASE_COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yml"
 ENV_FILE="${SCRIPT_DIR}/.env"
 VERSION="__VERSION__"
 
@@ -1516,10 +1516,10 @@ pull_remote_images() {
     local profile
     profile="$(env_val COMPOSE_PROFILES)"
     local services=(prowlarr byparr radarr sonarr seerr)
-    case "${profile}" in
-        plex) services+=(plex) ;;
-        jellyfin) services+=(jellyfin) ;;
-    esac
+    local server
+    for server in plex jellyfin silo; do
+        case ",${profile}," in *,"$server",*) services+=("$server") ;; esac
+    done
     compose_cmd pull "${services[@]}"
 }
 
@@ -1543,7 +1543,7 @@ show_help() {
     echo "  reset-auth  Push admin passwords from .env into Radarr/Sonarr/Prowlarr"
     echo "  enable      Enable auto-start on boot"
     echo "  disable     Disable auto-start on boot"
-    echo "  backup      Back up configs and .env"
+    echo "  backup      Back up configs and .env (briefly stops Silo if enabled)"
     echo "  restore     Restore from a backup (list or specify timestamp)"
     echo "  health      Check health of all services"
     echo "  shell <svc> Open a shell in a service container"
@@ -1559,11 +1559,20 @@ show_urls() {
     for svc in "${SVC_ORDER[@]}"; do
         printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "${SVC_LABELS[$svc]}" "$NC" "${SVC_PORTS[$svc]}"
     done
-    if [[ "${media_server}" == "plex" ]]; then
-        printf "  %b%-14s%b http://localhost:32400/web\n" "$BOLD" "Plex" "$NC"
-    else
-        printf "  %b%-14s%b http://localhost:8096\n" "$BOLD" "Jellyfin" "$NC"
-    fi
+    case ",${media_server}," in
+        *,plex,*) printf "  %b%-14s%b http://localhost:32400/web\n" "$BOLD" "Plex" "$NC" ;;
+    esac
+    case ",${media_server}," in
+        *,jellyfin,*) printf "  %b%-14s%b http://localhost:8096\n" "$BOLD" "Jellyfin" "$NC" ;;
+    esac
+    case ",${media_server}," in
+        *,silo,*)
+            local silo_port
+            silo_port="$(env_val SILO_HTTP_PORT || true)"
+            printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "Silo" "$NC" "${silo_port:-8090}"
+            ;;
+    esac
+    echo "  From another device, replace localhost with this server's LAN IP."
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
 cmd_keys() {
@@ -1756,15 +1765,25 @@ case "${1:-help}" in
         fi
         ;;
     backup)
+        case ",$(env_val COMPOSE_PROFILES)," in
+            *,silo,*) exec bash "${SCRIPT_DIR}/backup-silo.sh" "${SCRIPT_DIR}" ;;
+        esac
         backup_dir="$(dirname "${SCRIPT_DIR}")/backups/$(date +%Y%m%d_%H%M%S)"
         mkdir -p "${backup_dir}"
         chmod 700 "${backup_dir}"
         cp -a "${ENV_FILE}" "${backup_dir}/" 2>/dev/null || true
-        cp -a "${COMPOSE_FILE}" "${backup_dir}/" 2>/dev/null || true
+        cp -a "${BASE_COMPOSE_FILE}" "${backup_dir}/" 2>/dev/null || true
         cp -ra "${SCRIPT_DIR}/configs" "${backup_dir}/" 2>/dev/null || true
         echo -e "${GREEN}Backup saved to: ${backup_dir}${NC}"
         ;;
     restore)
+        case ",$(env_val COMPOSE_PROFILES)," in
+            *,silo,*)
+                echo "Silo includes a PostgreSQL database: use the cold restore procedure in docs/SILO.md."
+                echo "Automatic legacy restore is disabled to protect its database and encryption key."
+                exit 1
+                ;;
+        esac
         backups_dir="$(dirname "${SCRIPT_DIR}")/backups"
         if [[ ! -d "${backups_dir}" ]]; then
             echo -e "${RED}No backups found. Run 'backup' first to create one.${NC}"
@@ -1810,6 +1829,10 @@ case "${1:-help}" in
             echo -e "${RED}Backup not found: ${target}${NC}"
             exit 1
         fi
+        if [[ -f "${target}/.env" ]] && grep -Eq '^COMPOSE_PROFILES=.*silo' "${target}/.env"; then
+            echo "Use the Silo cold restore procedure in docs/SILO.md."
+            exit 1
+        fi
         echo -e "${YELLOW}Restoring from: $(basename "${target}")${NC}"
         echo -e "${RED}This will overwrite current configuration. Continue?${NC}"
         read -rp "Type 'yes' to confirm: " confirm
@@ -1821,7 +1844,7 @@ case "${1:-help}" in
         compose_cmd down 2>/dev/null || true
         # Restore files
         [[ -f "${target}/.env" ]] && cp -a "${target}/.env" "${ENV_FILE}" && echo "  Restored .env"
-        [[ -f "${target}/docker-compose.yml" ]] && cp -a "${target}/docker-compose.yml" "${COMPOSE_FILE}" && echo "  Restored docker-compose.yml"
+        [[ -f "${target}/docker-compose.yml" ]] && cp -a "${target}/docker-compose.yml" "${BASE_COMPOSE_FILE}" && echo "  Restored docker-compose.yml"
         [[ -d "${target}/configs" ]] && cp -ra "${target}/configs" "${SCRIPT_DIR}/" && \
             sudo chown -R "$(env_val PUID):$(env_val PGID)" "${SCRIPT_DIR}/configs" "${SCRIPT_DIR}/data" 2>/dev/null && \
             echo "  Restored configs/"
@@ -1845,7 +1868,7 @@ case "${1:-help}" in
     shell)
         if [[ -z "${2:-}" ]]; then
             echo -e "${YELLOW}Usage: ./manage.sh shell <service-name>${NC}"
-            echo "  Available: decypharr prowlarr byparr radarr sonarr seerr plex jellyfin"
+            echo "  Available: decypharr prowlarr byparr radarr sonarr seerr plex jellyfin silo"
             exit 1
         fi
         compose_cmd exec "$2" /bin/bash 2>/dev/null || compose_cmd exec "$2" /bin/sh
@@ -2996,6 +3019,9 @@ main() {
     # Parse command-line flags (moved to the very beginning)
     for arg in "$@"; do
         case "$arg" in
+            --add-silo)
+                exec bash "${SCRIPT_DIR}/add-silo.sh" "${INSTALL_DIR}"
+                ;;
             --refresh-management)
                 if [[ ! -f "${ENV_FILE}" ]]; then
                     log_error "No existing .env found at ${ENV_FILE}. Run setup first or set TORBOX_INSTALL_DIR."
@@ -3014,6 +3040,7 @@ main() {
                 echo "Usage: ./setup.sh [OPTIONS]"
                 echo ""
                 echo "Options:"
+                echo "  --add-silo                   Add Silo to an existing running stack (/dev/dri by default)"
                 echo "  --refresh-management         Refresh manage.sh only (preserves configs and running containers)"
                 echo "  -y, --yes, --non-interactive  Use defaults for all prompts"
                 echo "  -d, --dry-run                 Preview changes without applying them"
@@ -3036,6 +3063,17 @@ main() {
                 ;;
         esac
     done
+
+    # Full setup rewrites .env and hardware overrides. Preserve the add-on by
+    # directing existing Silo installations to the non-destructive entry points.
+    if [[ -f "${ENV_FILE}" && "${SYNC_AUTH_ONLY:-false}" != true ]]; then
+        case ",$(env_val COMPOSE_PROFILES)," in
+            *,silo,*)
+                log_error "Silo is installed. Use --refresh-management, --add-silo, or repair-install.sh; full setup would rewrite its deployment."
+                return 1
+                ;;
+        esac
+    fi
 
     # Warn if running as root (PUID/PGID would default to 0:0, usually undesirable)
     if [[ $EUID -eq 0 ]]; then

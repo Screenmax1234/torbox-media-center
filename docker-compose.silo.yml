@@ -1,0 +1,50 @@
+# Optional Silo omnibus deployment, based on https://siloserver.org/docs/install.
+# Included only by add-silo.sh, alongside the existing Plex/Jellyfin deployment.
+services:
+  silo:
+    # Verified multi-platform image on 2026-11-01. Override intentionally after backup.
+    image: ${SILO_OMNIBUS_IMAGE:-ghcr.io/silo-server/silo-server@sha256:8b652b0be194081936889b8ce48d5fc25cd8f71269d376a51170aada75678d07}
+    profiles: [silo]
+    restart: unless-stopped
+    stop_grace_period: 2m
+    cap_add: [NET_ADMIN]
+    networks: [media-network]
+    environment:
+      PORT: "8080"
+      JF_PORT: "8096"
+      ABS_PORT: "13378"
+      SECRET_KEY: ${SILO_SECRET_KEY:?Use add-silo.sh to generate the persistent key}
+      # The omnibus supervisor starts as root and drops privileges itself.
+      # In particular, do not copy the stack's `user: 0:0` directive here.
+      PUID: ${SILO_PUID:-911}
+      PGID: ${SILO_PGID:-911}
+      TZ: ${TZ:-Etc/UTC}
+      ENABLE_REDIS: "true"
+      ENABLE_MEILISEARCH: "false"
+      MEDIA_CONTAINER_ROOT: /data/media
+    ports:
+      - "${SILO_HTTP_PORT:-8090}:8080"
+      # Different host port to allow the real Jellyfin server to keep using 8096.
+      - "${SILO_JF_PORT:-8097}:8096"
+      - "${SILO_ABS_PORT:-13379}:13378"
+    volumes:
+      - "${CONFIG_DIR}/silo:/config"
+      # Match the absolute paths used by the existing Decypharr symlinks.
+      - "${DATA_DIR}:/data:ro"
+      - "${MOUNT_DIR}:/mnt/remote:ro,rslave"
+      - "${SILO_WORK_DIR:-./silo-work}/transcode:/tmp/silo-transcode"
+      - "${SILO_WORK_DIR:-./silo-work}/download-artifacts:/tmp/silo-download-artifacts"
+    depends_on:
+      decypharr:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/api/v1/ready]
+      interval: 15s
+      timeout: 5s
+      start_period: 20m
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

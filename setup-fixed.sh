@@ -9,6 +9,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 case "${1:-}" in
+    --add-silo)
+        shift
+        exec bash "${SCRIPT_DIR}/add-silo.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
+        ;;
     --repair)
         shift
         exec "${SCRIPT_DIR}/repair-install.sh" "${1:-}"
@@ -16,6 +20,7 @@ case "${1:-}" in
     --help|-h)
         echo "Usage: ./setup-fixed.sh [setup.sh options]"
         echo "       ./setup-fixed.sh --repair [INSTALL_DIR]"
+        echo "       bash setup-fixed.sh --add-silo [INSTALL_DIR]"
         echo "       ./setup-fixed.sh --refresh-management"
         echo ""
         echo "The normal path runs setup.sh with the local Decypharr build fix."

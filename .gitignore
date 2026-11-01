@@ -80,3 +80,8 @@ htmlcov/
 *.tar.bz2
 *.tar.xz
 *.tar.zst
+
+# Silo runtime state and private deployment/database backups
+silo-work/
+backup-before-silo-*/
+silo-backup-*/

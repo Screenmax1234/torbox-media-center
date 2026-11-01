@@ -1,0 +1,5 @@
+# Intel Quick Sync / AMD VA-API. Silo's image assigns host device groups itself.
+services:
+  silo:
+    devices:
+      - /dev/dri:/dev/dri
