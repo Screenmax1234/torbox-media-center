@@ -26,6 +26,34 @@ cd torbox-media-center
 bash setup.sh
 ```
 
+#### Alpine Linux / Alpine Docker LXC
+
+Alpine is supported through the separate `setup-alpine.sh` entry point. It
+installs the Alpine packages required by the stack, enables and starts Docker
+with OpenRC, checks Docker Compose v2 and FUSE, then passes all options to the
+same main installer used on other Linux distributions:
+
+```bash
+git clone https://github.com/Screenmax1234/torbox-media-center.git
+cd torbox-media-center
+TORBOX_API_KEY="your-api-key" bash setup-alpine.sh --yes
+```
+
+For Silo with GPU transcoding, pass `/dev/dri` through to the Alpine VM/LXC:
+
+```bash
+TORBOX_API_KEY="your-api-key" TORBOX_MEDIA_SERVER=silo bash setup-alpine.sh --yes
+```
+
+If the host has no render device, use `TORBOX_SILO_GPU=none` for CPU-only Silo.
+The Alpine wrapper requires `apk`, OpenRC, Docker, Docker Compose v2, and
+`/dev/fuse`. In a Proxmox LXC, enable nesting/keyctl and pass through both
+`/dev/fuse` and `/dev/dri` when hardware transcoding is needed. Running the
+wrapper as root is recommended for an Alpine Docker LXC; when run as another
+user it uses `sudo` for the host setup and installer handoff. The wrapper does
+not replace the normal `setup.sh`; it only prepares Alpine-specific host
+dependencies and then delegates to it. On non-Alpine systems, use `setup.sh`.
+
 For unattended installs:
 
 ```bash
