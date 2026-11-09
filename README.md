@@ -200,6 +200,7 @@ The versions below are the stable image pins in the current Compose file. They a
 | Byparr | `ghcr.io/thephaseless/byparr:3.0.4` | FlareSolverr-compatible API remains at `http://byparr:8191`; keep it under Prowlarr Indexer Proxies, never the global HTTP proxy. |
 | Radarr | `lscr.io/linuxserver/radarr:6.4.4.10685-ls324` | Current 6.4 release; back up the database before upgrading an older 5.x install. |
 | Sonarr | `lscr.io/linuxserver/sonarr:4.0.20.3014-ls2` | Current stable 4.0 release. |
+| Bazarr | `lscr.io/linuxserver/bazarr:1.6.2` | Subtitle automation companion for Radarr and Sonarr. |
 | Seerr | `ghcr.io/seerr-team/seerr:v3.5.1` | Includes the current 3.5 security fixes. |
 | Plex | `lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330` | Current stable 1.43.5 LinuxServer build. |
 | Jellyfin | `lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57` | Major upgrade from 10.11; Jellyfin recommends a full backup and a post-upgrade library scan. |
@@ -219,13 +220,14 @@ The following table maps the original behavior to the maintained deployment so a
 | TorBox throttling | The legacy repair path could preserve the obsolete `55/hour` request setting. | New configs use the provider’s general `250/minute` limit. Repair migrates only that exact legacy value and preserves custom values. |
 | Prowlarr / Byparr | Byparr could be mistaken for a global HTTP/SOCKS proxy. | Byparr is configured as the FlareSolverr-compatible indexer proxy at `http://byparr:8191`; the global proxy remains disabled. |
 | Seerr connections | Existing connections could be skipped or retained with stale API keys. | Setup and `diagnose-connections.sh --repair` authenticate, test and refresh the Radarr/Sonarr records before saving them. |
+| Subtitle automation | The original stack had no subtitle manager, so subtitles required manual downloads or media-server-specific tools. | Bazarr is included on port `6767`, shares the same `/data` and `/mnt/remote` paths, and is automatically connected to Sonarr and Radarr. Provider credentials and language profiles remain user-selected. |
 | Plex imports | Remote FUSE changes might not trigger a filesystem watcher, and old installs could have stale notifications. | `repair-plex.sh` repairs Radarr/Sonarr import notifications; Plex automatic title scanning is documented as the fallback for remote mounts. |
 | Management script | Older generated scripts accepted a required second argument for `keys`, causing `$2: unbound variable` when run as `./manage.sh keys`. | `keys` works by itself and masks secrets by default; use `keys --show-secrets` only when you need the values. The full command list below matches the generated script. |
 | Updating | `manage.sh update` could be mistaken for a repository update. | `manage.sh update` refreshes images using the Compose file already installed. `git pull` plus `bash setup-fixed.sh --repair ...` refreshes Compose, Dockerfile and `manage.sh` while preserving `.env`, configs and media data. |
 
 ### Updating an existing Linux installation
 
-Run this from the source checkout. The repair path copies the current Compose file, Decypharr Dockerfile and generated management script into the install directory, validates Compose, rebuilds Decypharr and starts the stack. It preserves `.env`, configs and media data.
+Run this from the source checkout. The repair path copies the current Compose file, Decypharr Dockerfile and generated management script into the install directory, adds Bazarr and its generated connection key when upgrading an older install, validates Compose, rebuilds Decypharr and starts the stack. It preserves existing `.env`, configs and media data.
 
 ```bash
 cd /root/torbox-media-center
@@ -319,7 +321,8 @@ To refresh stale Seerr connections or migrate the legacy Decypharr rate limit, u
 6. Decypharr sends the torrent hash to **TorBox** - TorBox already has it cached (popular movie!), so it's available **instantly**
 7. Decypharr creates a symlink: `/movies/Inception (2010) [imdbid-tt1375666]/Inception (2010) [Bluray-1080p].mkv`
 8. Radarr imports the file and notifies **Plex/Jellyfin**
-9. You open Plex or Jellyfin on your TV and press play - it streams directly from TorBox's cloud
+9. Bazarr watches the imported movie or episode and downloads matching subtitles after you enable a provider and language profile
+10. You open Plex or Jellyfin on your TV and press play - it streams directly from TorBox's cloud
 
 The whole process takes **seconds** for cached content (most popular movies/shows).
 
@@ -344,6 +347,13 @@ User Request                Search & Automation           Cloud Download
                                 │ symlink
                                 ▼
                          ┌──────────────┐
+                         │  Bazarr      │
+                         │    :6767     │
+                         │  subtitles   │
+                         └──────┬───────┘
+                                │ sidecars beside /data/media
+                                ▼
+                         ┌──────────────┐
                          │ Plex :32400  │    Streams to any device
                          │   or         │    Zero local storage
                          │ Jellyfin     │
@@ -362,6 +372,7 @@ User Request                Search & Automation           Cloud Download
 | **Byparr** | 8191 | Helps Prowlarr bypass Cloudflare protection on some indexer sites. Works automatically in the background. |
 | **Radarr** | 7878 | Movie manager. Searches for movies, picks the best quality torrent, sends it to Decypharr, and organizes your movie library. |
 | **Sonarr** | 8989 | TV show manager. Same as Radarr but for TV series - handles seasons, episodes, and ongoing shows automatically. |
+| **Bazarr** | 6767 | Subtitle manager. Connects to Sonarr/Radarr and writes subtitle sidecars beside movies and episodes. Configure providers and language profiles in its web UI. |
 | **Seerr** | 5055 | Beautiful web UI where you (and your family/friends) can browse and request movies and TV shows. Supports Plex, Jellyfin & Emby. |
 | **Plex** | 32400 | Media server option 1. Streams your library to any device. Requires a free Plex account. |
 | **Jellyfin** | 8096 | Media server option 2 (open-source, no account needed). Streams your library to any device. |
@@ -432,7 +443,7 @@ Then the script automatically:
 1. Checks and installs dependencies (Docker, FUSE, jq, openssl)
 2. Creates the full directory structure
 3. Generates Decypharr config with your TorBox API key
-4. Pre-seeds API keys into Radarr, Sonarr, and Prowlarr config files
+4. Pre-seeds API keys into Radarr, Sonarr, Prowlarr, and Bazarr config files
 5. Generates the `.env` file and Docker Compose
 6. Creates the `manage.sh` management script
 7. Sets up FUSE mount propagation
@@ -443,6 +454,7 @@ Then the script automatically:
    - Seerr connected to Radarr, Sonarr, and Plex/Jellyfin
    - Plex libraries (Movies + TV Shows) if claim token was provided
    - Default public indexer (1337x) in Prowlarr
+   - Bazarr connected to Sonarr and Radarr; subtitle providers and language profiles remain user-selected
 
 > **First run takes 5–15 minutes** (mostly downloading Docker images). Subsequent starts take seconds.
 >
@@ -458,7 +470,7 @@ The setup script pre-seeds and auto-configures as much as possible so you don't 
 
 | Setting | Value | Why |
 |---------|-------|-----|
-| API keys | Random 32-char hex keys for Radarr, Sonarr, Prowlarr | Enables API auto-configuration on first launch |
+| API keys | Random 32-char hex keys for Radarr, Sonarr, Prowlarr, and Bazarr | Enables API auto-configuration on first launch |
 | Authentication | `Enabled` | Requires login from first boot (auto-configured via API with pre-seeded credentials) |
 | Admin credentials | Auto-generated username/password for Radarr, Sonarr, Prowlarr | Stored in `.env`, seeded into *arr SQLite databases via API after containers start |
 | Decypharr credentials | Auto-generated username/password for Decypharr web UI | Injected into `config.json` during setup |
@@ -472,6 +484,7 @@ The setup script pre-seeds and auto-configures as much as possible so you don't 
 | **Radarr** | Download client (Decypharr), root folder, media management settings, naming convention, quality profile upgrades, Plex notifications |
 | **Sonarr** | Download client (Decypharr), root folder, media management settings, naming convention, quality profile upgrades, Plex/Jellyfin notifications |
 | **Prowlarr** | Connected to Radarr + Sonarr, default indexer (1337x) added, Byparr configured as FlareSolverr proxy |
+| **Bazarr** | Connected to Sonarr and Radarr using the shared `/data` paths; provider credentials and language profiles are configured by you |
 | **Seerr** | Connected to Radarr, Sonarr, and your media server (Plex or Jellyfin) |
 | **Plex** | Libraries for Movies and TV Shows created (if claim token was provided) |
 | **Radarr/Sonarr/Prowlarr** | Admin authentication (Forms auth with auto-generated credentials) configured via API |
@@ -494,6 +507,7 @@ Once setup completes, open these URLs in your browser:
 | Radarr | http://localhost:7878 | Movie manager |
 | Sonarr | http://localhost:8989 | TV show manager |
 | Prowlarr | http://localhost:9696 | Indexer manager |
+| Bazarr | http://localhost:6767 | Subtitle manager |
 | Decypharr | http://localhost:8282 | TorBox bridge status |
 | Plex | http://localhost:32400/web | Media server (if chosen) |
 | Jellyfin | http://localhost:8096 | Media server (if chosen) |
@@ -529,7 +543,28 @@ Seerr requires a brief one-time wizard:
 
 **✅ What success looks like:** Seerr's main page shows a search bar and "Discover" section with trending movies and shows.
 
-### Step 4: Test the Full Flow (~2 minutes)
+### Step 4: Configure Bazarr subtitle providers (~5 minutes)
+
+Open **Bazarr** at `http://localhost:6767` (or replace `localhost` with the
+server's LAN IP). The installer has already connected Bazarr to:
+
+| Service | Bazarr address | Media path |
+|---------|----------------|------------|
+| Sonarr | `http://sonarr:8989` | `/data/media/tv` |
+| Radarr | `http://radarr:7878` | `/data/media/movies` |
+
+Finish the Bazarr setup by enabling at least one subtitle provider and creating
+language profiles under **Settings → Languages**. Provider accounts and API
+credentials cannot be generated by the installer. Enable **Use Sonarr** and
+**Use Radarr**, then run a wanted search for an imported title. Bazarr writes
+`.srt`, `.ass` or other subtitle sidecars next to the media file, so Plex,
+Jellyfin and Silo can read them using the existing library paths.
+
+If you use Silo's built-in subtitle search as well, choose one workflow for
+automatic downloads to avoid duplicate sidecars. Bazarr can still be used as
+the automatic background downloader.
+
+### Step 5: Test the Full Flow (~2 minutes)
 
 Everything is set up! Let's make sure it all works end-to-end.
 
@@ -564,6 +599,7 @@ cd torbox-media-server/
 ./manage.sh status    # Check service status
 ./manage.sh logs      # View all logs (follow mode)
 ./manage.sh logs radarr  # View specific service logs
+./manage.sh logs bazarr  # View subtitle service logs
 ./manage.sh pull      # Pull pinned image versions without restarting
 ./manage.sh update    # Pull pinned images and restart
 ./manage.sh down      # Stop and remove containers
@@ -616,6 +652,7 @@ torbox-media-server/
 │   ├── prowlarr/config.xml          # Pre-seeded API key & auth settings
 │   ├── radarr/config.xml            # Pre-seeded API key & auth settings
 │   ├── sonarr/config.xml            # Pre-seeded API key & auth settings
+│   ├── bazarr/config.yaml           # Pre-seeded API key and *arr connections
 │   ├── seerr/
 │   └── plex/ or jellyfin/
 └── data/
@@ -669,6 +706,7 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 - **Authentication is set to `Forms` with `Enabled`** automatically during setup. Secure admin credentials are auto-generated for Radarr, Sonarr, and Prowlarr, ensuring they are protected by default if you choose to expose them to your LAN
 - **The `.env` file** contains your TorBox API key, admin credentials, and *arr API keys - it's `chmod 600` (owner-read only). Don't commit it to version control
 - **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access - other containers only read files via symlinks
+- **Bazarr** shares `/data` and `/mnt/remote` with the *arrs so subtitle sidecars are written beside the imported media
 - **Decypharr config directory is mounted to `/app`** - the entire config directory is bind-mounted (not just config.json) because Decypharr needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
 - **Seerr is pinned to v3.5.1** - this includes the current security fixes in the published 3.5 release line. Keep the source checkout current before upgrading the installed stack.
 
@@ -746,6 +784,10 @@ The following environment variables can be set before running `bash setup.sh --y
 | `TORBOX_INSTALL_DIR` | `<repo>/torbox-media-server` | Custom install directory (used by CasaOS installer) |
 | `TORBOX_CASAOS` | `false` | Set `true` when installing on CasaOS |
 | `SYNC_AUTH_ONLY` | `false` | Set `true` to only re-sync admin credentials to running *arrs (no full setup) |
+
+`BAZARR_API_KEY` is generated and preserved automatically in the installed
+`.env`; it is not an installer input. Use `./manage.sh keys` to view it. Bazarr
+provider credentials and language profiles are configured in Bazarr's web UI.
 
 ---
 
@@ -845,6 +887,21 @@ If Prowlarr reports proxy errors involving port **8191**, disable **Settings →
 Some sites have advanced protections that no automated solver can bypass. Try:
 - Using indexers that don't require Cloudflare bypass
 - Checking if Byparr needs an update: `./manage.sh update`
+
+### Bazarr is running but no subtitles are downloaded
+
+Open `http://YOUR-SERVER-IP:6767` and check **Settings → Sonarr** and
+**Settings → Radarr**. They should use the Docker names `sonarr` and `radarr`,
+ports `8989` and `7878`, and the API keys shown by `./manage.sh keys`.
+The installer applies those connections automatically, so a failure usually
+means the container was started before the *arrs were ready; rerun
+`./manage.sh update` or restart Bazarr after the *arrs are healthy.
+
+Then configure at least one subtitle provider and a language profile under
+**Settings → Languages**. Bazarr cannot download anything until both are
+enabled. Verify that the movie or episode is imported under `/data/media` and
+that Bazarr can write a sidecar beside it. The service log is available with
+`./manage.sh logs bazarr`.
 
 ### Services not accessible from other devices
 

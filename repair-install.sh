@@ -13,6 +13,7 @@ INSTALL_DIR="${1:-${TORBOX_INSTALL_DIR:-${SCRIPT_DIR}/torbox-media-server}}"
 ENV_FILE="${INSTALL_DIR}/.env"
 COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
 DOCKERFILE="${INSTALL_DIR}/Dockerfile.decypharr"
+CONFIG_DIR=""
 
 red='\033[0;31m'
 green='\033[0;32m'
@@ -38,10 +39,50 @@ backup_dir="${INSTALL_DIR}/backup-before-repair-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "${backup_dir}"
 [[ -f "${COMPOSE_FILE}" ]] && cp -a "${COMPOSE_FILE}" "${backup_dir}/"
 [[ -f "${DOCKERFILE}" ]] && cp -a "${DOCKERFILE}" "${backup_dir}/"
+[[ -f "${ENV_FILE}" ]] && cp -a "${ENV_FILE}" "${backup_dir}/"
+[[ -f "${INSTALL_DIR}/configs/bazarr/config.yaml" ]] && mkdir -p "${backup_dir}/configs/bazarr" && cp -a "${INSTALL_DIR}/configs/bazarr/config.yaml" "${backup_dir}/configs/bazarr/"
 
 cp "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
 cp "${SCRIPT_DIR}/Dockerfile.decypharr" "${DOCKERFILE}"
 chmod 600 "${COMPOSE_FILE}" "${ENV_FILE}"
+
+# Add Bazarr to older installs without replacing their existing settings.
+source "${SCRIPT_DIR}/lib/env.sh"
+CONFIG_DIR="$(env_val CONFIG_DIR "${ENV_FILE}" || true)"
+CONFIG_DIR="${CONFIG_DIR:-${INSTALL_DIR}/configs}"
+mkdir -p "${CONFIG_DIR}/bazarr"
+BAZARR_API_KEY="$(env_val BAZARR_API_KEY "${ENV_FILE}" || true)"
+if [[ ! "${BAZARR_API_KEY}" =~ ^[0-9a-f]{32}$ ]]; then
+    BAZARR_API_KEY="$(openssl rand -hex 16 2>/dev/null || true)"
+    [[ "${BAZARR_API_KEY}" =~ ^[0-9a-f]{32}$ ]] || die "Could not generate a Bazarr API key. Install openssl and retry."
+    printf '\nBAZARR_API_KEY="%s"\n' "${BAZARR_API_KEY}" >>"${ENV_FILE}"
+fi
+if [[ ! -f "${CONFIG_DIR}/bazarr/config.yaml" ]]; then
+    cat >"${CONFIG_DIR}/bazarr/config.yaml" <<BAZARR_YAML
+general:
+  ip: "*"
+  port: 6767
+  use_sonarr: true
+  use_radarr: true
+  path_mappings: []
+  path_mappings_movie: []
+auth:
+  apikey: "${BAZARR_API_KEY}"
+sonarr:
+  ip: "sonarr"
+  port: 8989
+  base_url: "/"
+  ssl: false
+  apikey: "$(env_val SONARR_API_KEY "${ENV_FILE}" || true)"
+radarr:
+  ip: "radarr"
+  port: 7878
+  base_url: "/"
+  ssl: false
+  apikey: "$(env_val RADARR_API_KEY "${ENV_FILE}" || true)"
+BAZARR_YAML
+    chmod 600 "${CONFIG_DIR}/bazarr/config.yaml"
+fi
 
 # Refresh the generated management script too; git pull alone cannot update it.
 TORBOX_INSTALL_DIR="${INSTALL_DIR}" bash "${SCRIPT_DIR}/setup.sh" --refresh-management

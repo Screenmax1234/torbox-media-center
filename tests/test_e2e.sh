@@ -94,6 +94,7 @@ dummy_env=(
     RADARR_API_KEY="abcdef1234567890abcdef1234567890"
     SONARR_API_KEY="abcdef1234567890abcdef1234567891"
     PROWLARR_API_KEY="abcdef1234567890abcdef1234567892"
+    BAZARR_API_KEY="abcdef1234567890abcdef1234567893"
     SEERR_API_KEY="MTIzNDU2Nzg5MA=="
     RADARR_ADMIN_USER="admin" RADARR_ADMIN_PASS="testpass"
     SONARR_ADMIN_USER="admin" SONARR_ADMIN_PASS="testpass"
@@ -141,6 +142,7 @@ expected_images=(
     'ghcr.io/thephaseless/byparr:3.0.4'
     'lscr.io/linuxserver/radarr:6.4.4.10685-ls324'
     'lscr.io/linuxserver/sonarr:4.0.20.3014-ls2'
+    'lscr.io/linuxserver/bazarr:1.6.2'
     'ghcr.io/seerr-team/seerr:v3.5.1'
     'lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330'
     'lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57'
@@ -252,6 +254,12 @@ for func in "${required_functions[@]}"; do
         fail "Function ${func}() NOT found"
     fi
 done
+if grep -qE '^generate_bazarr_config\(\)' "${PROJECT_ROOT}/lib/bazarr.sh" &&
+    grep -qE '^configure_bazarr\(\)' "${PROJECT_ROOT}/lib/bazarr.sh"; then
+    pass "Bazarr helper functions exist in lib/bazarr.sh"
+else
+    fail "Bazarr helper functions missing from lib/bazarr.sh"
+fi
 
 # ============================================================================
 #  4. BUG REGRESSION TESTS
@@ -598,7 +606,7 @@ section "Cross-Cutting Consistency"
 
 # 9.1 SVC_PORTS in manage.sh match docker-compose.yml
 compose_ports=$(grep -E '^\s+- "[^\"]*:[0-9]+"' "$COMPOSE_FILE" | grep -oE '[0-9]+"$' | tr -d '"' | sort -u)
-for port in 8282 9696 8191 7878 8989 5055; do
+for port in 8282 9696 8191 7878 8989 6767 5055; do
     if echo "$compose_ports" | grep -q "^${port}$"; then
         pass "Port $port in manage.sh matches docker-compose.yml"
     else

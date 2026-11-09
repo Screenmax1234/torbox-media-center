@@ -20,7 +20,7 @@ case "$*" in
     *'ps -a -q silo') echo silo-cid ;;
     *'pull silo') [[ "${FAIL_PULL:-false}" != true ]] ;;
     *'up -d --no-deps silo') [[ "${FAIL_START:-false}" != true ]] ;;
-    *'config -q'|*'start silo'|*'stop silo'|*'pull prowlarr byparr radarr sonarr seerr plex silo'|*'pull prowlarr byparr radarr sonarr seerr jellyfin silo') ;;
+    *'config -q'|*'start silo'|*'stop silo'|*'pull prowlarr byparr radarr sonarr bazarr seerr plex silo'|*'pull prowlarr byparr radarr sonarr bazarr seerr jellyfin silo') ;;
     *) echo "Unexpected Docker call: $*" >&2; exit 2 ;;
 esac
 MOCK
@@ -68,7 +68,7 @@ urls=$(bash "$install_dir/manage.sh" urls)
 grep -q 'Plex.*32400/web' <<<"$urls"
 grep -q 'Silo.*18090' <<<"$urls"
 bash "$install_dir/manage.sh" pull >>"$test_dir/output"
-grep -q 'pull prowlarr byparr radarr sonarr seerr plex silo$' "$DOCKER_TEST_LOG"
+grep -q 'pull prowlarr byparr radarr sonarr bazarr seerr plex silo$' "$DOCKER_TEST_LOG"
 echo 'PASS: adds only Silo; preserves base, overrides, credentials and key; management supports both profiles'
 
 fixture jellyfin jellyfin
@@ -76,7 +76,7 @@ bash "$PROJECT_ROOT/add-silo.sh" "$install_dir" >>"$test_dir/output"
 urls=$(bash "$install_dir/manage.sh" urls)
 grep -q 'Jellyfin.*8096' <<<"$urls"
 bash "$install_dir/manage.sh" pull >>"$test_dir/output"
-grep -q 'pull prowlarr byparr radarr sonarr seerr jellyfin silo$' "$DOCKER_TEST_LOG"
+grep -q 'pull prowlarr byparr radarr sonarr bazarr seerr jellyfin silo$' "$DOCKER_TEST_LOG"
 help=$(bash "$PROJECT_ROOT/setup.sh" --help)
 grep -q "TORBOX_MEDIA_SERVER.*silo" <<<"$help"
 grep -q "TORBOX_ENABLE_SILO" <<<"$help"

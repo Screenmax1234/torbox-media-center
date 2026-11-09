@@ -7,7 +7,7 @@ trap 'echo -e "\n\033[0;31m[ERROR] Unexpected error at line $LINENO in command: 
 #  TorBox Media Server - All-in-One Setup Script
 #  Automated setup for a debrid-powered media server using Docker
 #
-#  Components: Prowlarr, Byparr, Decypharr, Seerr,
+#  Components: Prowlarr, Byparr, Decypharr, Bazarr, Seerr,
 #              Radarr, Sonarr, rclone/FUSE mount, Plex or Jellyfin
 #
 #  Designed for CachyOS (Arch-based) but works on most Linux distros.
@@ -86,6 +86,7 @@ source "${SCRIPT_DIR}/lib/env.sh"
 source "${SCRIPT_DIR}/lib/seerr.sh"
 source "${SCRIPT_DIR}/lib/plex.sh"
 source "${SCRIPT_DIR}/lib/silo.sh"
+source "${SCRIPT_DIR}/lib/bazarr.sh"
 
 # Docker image versions are pinned directly in docker-compose.yml.
 
@@ -140,7 +141,7 @@ print_banner() {
   ╔══════════════════════════════════════════════════════════════╗
   ║           TorBox Media Server - All-in-One Setup            ║
   ║                                                             ║
-  ║   Prowlarr · Byparr · Decypharr · Seerr                    ║
+  ║   Prowlarr · Byparr · Decypharr · Bazarr · Seerr            ║
   ║   Radarr · Sonarr · rclone/FUSE · Plex/Jellyfin            ║
   ╚══════════════════════════════════════════════════════════════╝
 EOF
@@ -162,14 +163,14 @@ mask_key() {
 }
 
 # Service port registry (single source of truth for all port/label references)
-SVC_ORDER=(decypharr prowlarr byparr radarr sonarr seerr)
+SVC_ORDER=(decypharr prowlarr byparr radarr sonarr bazarr seerr)
 declare -A SVC_PORTS=(
     [decypharr]=8282 [prowlarr]=9696 [byparr]=8191
-    [radarr]=7878 [sonarr]=8989 [seerr]=5055
+    [radarr]=7878 [sonarr]=8989 [bazarr]=6767 [seerr]=5055
 )
 declare -A SVC_LABELS=(
     [decypharr]="Decypharr" [prowlarr]="Prowlarr" [byparr]="Byparr"
-    [radarr]="Radarr" [sonarr]="Sonarr" [seerr]="Seerr"
+    [radarr]="Radarr" [sonarr]="Sonarr" [bazarr]="Bazarr" [seerr]="Seerr"
 )
 
 print_service_urls() {
@@ -761,6 +762,18 @@ gather_config() {
         done
     fi
 
+    # Bazarr uses its own API key for the post-start connection sync. Preserve
+    # it across reruns so existing clients and scripts keep working.
+    if [[ -n "${EXISTING_BAZARR_API_KEY:-}" && "${EXISTING_BAZARR_API_KEY}" =~ ^[0-9a-f]{32}$ ]]; then
+        BAZARR_API_KEY="${EXISTING_BAZARR_API_KEY}"
+    else
+        BAZARR_API_KEY="$(generate_api_key)"
+    fi
+    if [[ -z "${BAZARR_API_KEY}" || ${#BAZARR_API_KEY} -lt 32 ]]; then
+        log_error "Failed to generate API key for Bazarr. Ensure openssl, xxd, or od is installed."
+        exit 1
+    fi
+
     # Generate or preserve admin credentials for the *arr services
     # Radarr
     if [[ -n "${EXISTING_RADARR_ADMIN_USER:-}" && -n "${EXISTING_RADARR_ADMIN_PASS:-}" ]]; then
@@ -1066,7 +1079,7 @@ create_directories() {
     umask 022
 
     mkdir -p "${INSTALL_DIR}"
-    mkdir -p "${CONFIG_DIR}"/{prowlarr,radarr,sonarr,seerr,decypharr}
+    mkdir -p "${CONFIG_DIR}"/{prowlarr,radarr,sonarr,bazarr,seerr,decypharr}
     mkdir -p "${DATA_DIR}"/{media/{movies,tv},downloads/{radarr,sonarr}}
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
@@ -1332,6 +1345,7 @@ PLEX_CLAIM="${PLEX_CLAIM:-}"
 RADARR_API_KEY="${RADARR_API_KEY}"
 SONARR_API_KEY="${SONARR_API_KEY}"
 PROWLARR_API_KEY="${PROWLARR_API_KEY}"
+BAZARR_API_KEY="${BAZARR_API_KEY}"
 
 # Decypharr credentials (pre-seeded)
 DECYPHARR_USER="${DECYPHARR_USER:-torbox}"
@@ -1543,14 +1557,14 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 # Service port registry
-SVC_ORDER=(decypharr prowlarr byparr radarr sonarr seerr)
+SVC_ORDER=(decypharr prowlarr byparr radarr sonarr bazarr seerr)
 declare -A SVC_PORTS=(
     [decypharr]=8282 [prowlarr]=9696 [byparr]=8191
-    [radarr]=7878 [sonarr]=8989 [seerr]=5055
+    [radarr]=7878 [sonarr]=8989 [bazarr]=6767 [seerr]=5055
 )
 declare -A SVC_LABELS=(
     [decypharr]="Decypharr" [prowlarr]="Prowlarr" [byparr]="Byparr"
-    [radarr]="Radarr" [sonarr]="Sonarr" [seerr]="Seerr"
+    [radarr]="Radarr" [sonarr]="Sonarr" [bazarr]="Bazarr" [seerr]="Seerr"
 )
 
 # Safely read a value from .env without executing shell code.
@@ -1611,7 +1625,7 @@ pull_remote_images() {
     # Hub and fail with "pull access denied for torbox-decypharr".
     local profile
     profile="$(env_val COMPOSE_PROFILES)"
-    local services=(prowlarr byparr radarr sonarr seerr)
+    local services=(prowlarr byparr radarr sonarr bazarr seerr)
     local server
     for server in plex jellyfin silo; do
         case ",${profile}," in *,"$server",*) services+=("$server") ;; esac
@@ -1700,6 +1714,7 @@ cmd_keys() {
     echo -e "  ${BOLD}Radarr${NC}    $(mask_val "$(env_val RADARR_API_KEY)")"
     echo -e "  ${BOLD}Sonarr${NC}    $(mask_val "$(env_val SONARR_API_KEY)")"
     echo -e "  ${BOLD}Prowlarr${NC}  $(mask_val "$(env_val PROWLARR_API_KEY)")"
+    echo -e "  ${BOLD}Bazarr${NC}    $(mask_val "$(env_val BAZARR_API_KEY)")"
 
     _radarr_pass="$(env_val RADARR_ADMIN_PASS)"
     _sonarr_pass="$(env_val SONARR_ADMIN_PASS)"
@@ -1968,7 +1983,7 @@ case "${1:-help}" in
     shell)
         if [[ -z "${2:-}" ]]; then
             echo -e "${YELLOW}Usage: ./manage.sh shell <service-name>${NC}"
-            echo "  Available: decypharr prowlarr byparr radarr sonarr seerr plex jellyfin silo"
+            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr plex jellyfin silo"
             exit 1
         fi
         compose_cmd exec "$2" /bin/bash 2>/dev/null || compose_cmd exec "$2" /bin/sh
@@ -2373,6 +2388,8 @@ configure_arrs() {
         configure_silo || _failed=$((_failed + 1))
     fi
 
+    configure_bazarr "http://localhost:${SVC_PORTS[bazarr]}" || _failed=$((_failed + 1))
+
     configure_seerr || _failed=$((_failed + 1))
 
     # Wait for Plex to be claimed before configuring its import notifications.
@@ -2718,6 +2735,7 @@ print_post_install() {
     echo -e "  ${BOLD}Radarr${NC}    $(mask_key "${RADARR_API_KEY}")"
     echo -e "  ${BOLD}Sonarr${NC}    $(mask_key "${SONARR_API_KEY}")"
     echo -e "  ${BOLD}Prowlarr${NC}  $(mask_key "${PROWLARR_API_KEY}")"
+    echo -e "  ${BOLD}Bazarr${NC}    $(mask_key "${BAZARR_API_KEY}")"
     echo -e "  ${YELLOW}View full keys with:${NC} cd ${INSTALL_DIR} && ./manage.sh keys"
     echo ""
 
@@ -2750,6 +2768,7 @@ print_post_install() {
         echo -e "  ${GREEN}✓${NC} Prowlarr Byparr proxy (FlareSolverr-compatible)"
         echo -e "  ${GREEN}✓${NC} Prowlarr Radarr app connection"
         echo -e "  ${GREEN}✓${NC} Prowlarr Sonarr app connection"
+        echo -e "  ${GREEN}✓${NC} Bazarr Sonarr/Radarr connections (subtitle providers and languages are yours to choose)"
         echo -e "  ${YELLOW}⚠${NC} Seerr Radarr & Sonarr (requires setup wizard completion)"
         if [[ "$MEDIA_SERVER" == "plex" ]]; then
             echo -e "  ${GREEN}✓${NC} Radarr Plex notification (instant library updates)"
@@ -3009,6 +3028,7 @@ print_post_install() {
 EXISTING_RADARR_API_KEY=""
 EXISTING_SONARR_API_KEY=""
 EXISTING_PROWLARR_API_KEY=""
+EXISTING_BAZARR_API_KEY=""
 EXISTING_TORBOX_API_KEY=""
 EXISTING_RADARR_ADMIN_USER=""
 EXISTING_RADARR_ADMIN_PASS=""
@@ -3063,6 +3083,7 @@ check_existing_installation() {
         EXISTING_RADARR_API_KEY="$(env_val RADARR_API_KEY)" || true
         EXISTING_SONARR_API_KEY="$(env_val SONARR_API_KEY)" || true
         EXISTING_PROWLARR_API_KEY="$(env_val PROWLARR_API_KEY)" || true
+        EXISTING_BAZARR_API_KEY="$(env_val BAZARR_API_KEY)" || true
         EXISTING_TORBOX_API_KEY="$(env_val TORBOX_API_KEY)" || true
         EXISTING_COMPOSE_PROFILES="$(env_val COMPOSE_PROFILES)" || true
         EXISTING_SILO_SECRET_KEY="$(env_val SILO_SECRET_KEY)" || true
@@ -3129,6 +3150,7 @@ check_existing_installation() {
             EXISTING_RADARR_API_KEY=$(grep '^RADARR_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SONARR_API_KEY=$(grep '^SONARR_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_PROWLARR_API_KEY=$(grep '^PROWLARR_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_BAZARR_API_KEY=$(grep '^BAZARR_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_RADARR_ADMIN_USER=$(grep '^RADARR_ADMIN_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_RADARR_ADMIN_PASS=$(grep '^RADARR_ADMIN_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SONARR_ADMIN_USER=$(grep '^SONARR_ADMIN_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
@@ -3292,7 +3314,7 @@ main() {
         echo ""
         echo "  1. Create directories:"
         echo "     mkdir -p ${INSTALL_DIR}"
-        echo "     mkdir -p ${CONFIG_DIR}/{prowlarr,radarr,sonarr,seerr,decypharr}"
+        echo "     mkdir -p ${CONFIG_DIR}/{prowlarr,radarr,sonarr,bazarr,seerr,decypharr}"
         echo "     mkdir -p ${DATA_DIR}/{media/{movies,tv},downloads/{radarr,sonarr}}"
         if [[ "$MEDIA_SERVER" == "plex" ]]; then
             echo "     mkdir -p ${CONFIG_DIR}/plex"
@@ -3309,6 +3331,7 @@ main() {
         echo "     ${CONFIG_DIR}/radarr/config.xml (API key: $(mask_key "${RADARR_API_KEY:-pending}"))"
         echo "     ${CONFIG_DIR}/sonarr/config.xml (API key: $(mask_key "${SONARR_API_KEY:-pending}"))"
         echo "     ${CONFIG_DIR}/prowlarr/config.xml (API key: $(mask_key "${PROWLARR_API_KEY:-pending}"))"
+        echo "     ${CONFIG_DIR}/bazarr/config.yaml (API key: $(mask_key "${BAZARR_API_KEY:-pending}"))"
         echo ""
         echo "  3. Generate files:"
         echo "     ${ENV_FILE}"
@@ -3318,7 +3341,7 @@ main() {
         echo "  4. Set up systemd service: torbox-media-server"
         echo ""
         echo "  5. Start Docker containers:"
-        echo "     decypharr, prowlarr, byparr, radarr, sonarr, seerr, ${MEDIA_SERVER}"
+        echo "     decypharr, prowlarr, byparr, radarr, sonarr, bazarr, seerr, ${MEDIA_SERVER}"
         echo ""
         echo "  6. Auto-configure via API (download clients, root folders, naming, etc.)"
         echo ""
@@ -3329,6 +3352,7 @@ main() {
     create_directories
     generate_decypharr_config
     generate_arr_configs
+    generate_bazarr_config
     generate_env_file
     generate_docker_compose
     generate_management_script

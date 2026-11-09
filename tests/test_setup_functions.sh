@@ -734,10 +734,10 @@ test_compose_has_cap_drop_on_all_services() {
     local compose_file="${SCRIPT_DIR}/../docker-compose.yml"
     local count
     count=$(grep -c 'cap_drop:' "$compose_file")
-    if [[ $count -eq 8 ]]; then
-        pass "All 8 services have cap_drop directive"
+    if [[ $count -eq 9 ]]; then
+        pass "All 9 services have cap_drop directive"
     else
-        fail "Expected 8 cap_drop entries, found $count"
+        fail "Expected 9 cap_drop entries, found $count"
     fi
 }
 
@@ -748,7 +748,7 @@ test_compose_s6_overlay_has_cap_add() {
     #   s6-applyuidgid: fatal: unable to set supplementary group list:
     #   Operation not permitted
     local compose_file="${SCRIPT_DIR}/../docker-compose.yml"
-    local s6_services="prowlarr radarr sonarr plex jellyfin"
+    local s6_services="prowlarr radarr sonarr bazarr plex jellyfin"
     local missing=0
     for svc in $s6_services; do
         local block
