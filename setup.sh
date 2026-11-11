@@ -13,7 +13,7 @@ trap 'echo -e "\n\033[0;31m[ERROR] Unexpected error at line $LINENO in command: 
 #  Designed for CachyOS (Arch-based) but works on most Linux distros.
 # ============================================================================
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 DRY_RUN=false
 SERVICES_STARTED=false
 NON_INTERACTIVE=false
@@ -21,6 +21,33 @@ SPINNER_PID=""
 
 # Tracks any temp file created by run_with_spinner so the interrupt handler can clean it up.
 SPINNER_TMPFILE=""
+
+# Optional AIOStreams/Usenet settings. These are populated by gather_config and
+# written to the private installed .env; they are deliberately not defaults in
+# the base Compose file so existing TorBox-only installs stay unchanged.
+AIOSTREAMS_ENABLED=false
+AIOSTREAMS_USENET_MODE="none"
+AIOSTREAMS_FUSE_ENABLED=false
+AIOSTREAMS_PORT=3000
+AIOSTREAMS_MOUNT_DIR="/mnt/aiostreams"
+AIOSTREAMS_HOST_PARENT="/mnt"
+AIOSTREAMS_CACHE_BYTES="0"
+AIOSTREAMS_BASE_URL=""
+AIOSTREAMS_SECRET_KEY=""
+AIOSTREAMS_AUTH=""
+AIOSTREAMS_AUTH_USER=""
+AIOSTREAMS_AUTH_PASS=""
+AIOSTREAMS_USENET_PROVIDERS="[]"
+AIOSTREAMS_ARR_INSTANCES="[]"
+AIOSTREAMS_NEWZNAB_URL=""
+AIOSTREAMS_NEWZNAB_API_KEY=""
+
+# Optional native Decypharr Usenet integration. The provider list is JSON so
+# multiple primary/backup NNTP providers can be passed through safely.
+DECYPHARR_USENET_ENABLED=false
+DECYPHARR_USENET_PROVIDERS="[]"
+DECYPHARR_USENET_DISK_PATH=""
+DECYPHARR_USENET_PRIORITY=0
 
 trap 'cleanup_on_interrupt' INT TERM
 
@@ -88,7 +115,8 @@ source "${SCRIPT_DIR}/lib/plex.sh"
 source "${SCRIPT_DIR}/lib/silo.sh"
 source "${SCRIPT_DIR}/lib/bazarr.sh"
 
-# Docker image versions are pinned directly in docker-compose.yml.
+# Published images follow upstream latest stable tags by default. Operators can
+# set image variables in the installed .env to release tags or digests.
 
 # Generate deterministic-length API keys (32-char hex, matching *arr format)
 generate_api_key() {
@@ -162,6 +190,18 @@ mask_key() {
     if [[ ${#k} -gt 4 ]]; then echo "${k:0:4}...${k: -4}"; else echo "$k"; fi
 }
 
+# Quote a value for Docker Compose's dotenv parser. Newshosting passwords and
+# AIOStreams JSON may contain characters that would otherwise be interpreted as
+# comments, interpolation, or quote delimiters.
+dotenv_quote() {
+    local value="${1:-}"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//\$/\\\$}"
+    value="${value//\`/\\\`}"
+    printf '"%s"' "$value"
+}
+
 # Service port registry (single source of truth for all port/label references)
 SVC_ORDER=(decypharr prowlarr byparr radarr sonarr bazarr seerr)
 declare -A SVC_PORTS=(
@@ -178,6 +218,11 @@ print_service_urls() {
     for svc in "${SVC_ORDER[@]}"; do
         printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "${SVC_LABELS[$svc]}" "$NC" "${SVC_PORTS[$svc]}"
     done
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "AIOStreams" "$NC" "${AIOSTREAMS_PORT:-3000}"
+    elif [[ "$(env_val AIOSTREAMS_ENABLED || true)" == "true" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "AIOStreams" "$NC" "$(env_val AIOSTREAMS_PORT || echo 3000)"
+    fi
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
         printf "  %b%-14s%b http://localhost:32400/web\n" "$BOLD" "Plex" "$NC"
     elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
@@ -375,6 +420,10 @@ check_port_conflicts() {
         ports_to_check+=("${SILO_HTTP_PORT:-8090}" "${SILO_JF_PORT:-8097}" "${SILO_ABS_PORT:-13379}")
         port_names+=("Silo" "Silo-Jellyfin" "Silo-ABS")
     fi
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        ports_to_check+=("${AIOSTREAMS_PORT:-3000}")
+        port_names+=("AIOStreams")
+    fi
     local conflicts=false
     local network_stats=""
     if command -v ss &>/dev/null; then
@@ -493,6 +542,315 @@ install_dependencies() {
 # ============================================================================
 #  User Configuration
 # ============================================================================
+
+gather_aiostreams_config() {
+    local enable="${TORBOX_ENABLE_AIOSTREAMS:-}"
+    if [[ -z "$enable" && "${EXISTING_COMPOSE_PROFILES:-}" == *aiostreams* ]]; then
+        enable=true
+    fi
+    if [[ -z "$enable" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            enable=false
+        else
+            echo -e "${BOLD}AIOStreams / Usenet${NC} (optional)"
+            echo "  AIOStreams can stream Usenet directly and can optionally act as"
+            echo "  the SABnzbd client for Radarr/Sonarr without storing media locally."
+            read -rp "  Enable AIOStreams? [y/N]: " enable_answer
+            [[ "${enable_answer,,}" == "y" || "${enable_answer,,}" == "yes" ]] && enable=true || enable=false
+        fi
+    fi
+    case "${enable,,}" in
+        1|true|yes|y) AIOSTREAMS_ENABLED=true ;;
+        *) AIOSTREAMS_ENABLED=false; return 0 ;;
+    esac
+
+    AIOSTREAMS_PORT="${TORBOX_AIOSTREAMS_PORT:-${EXISTING_AIOSTREAMS_PORT:-3000}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_AIOSTREAMS_PORT:-}" ]]; then
+        read -rp "  AIOStreams host port [${AIOSTREAMS_PORT}]: " _aio_port
+        AIOSTREAMS_PORT="${_aio_port:-$AIOSTREAMS_PORT}"
+    fi
+    if [[ ! "$AIOSTREAMS_PORT" =~ ^[0-9]+$ ]] || ((AIOSTREAMS_PORT < 1 || AIOSTREAMS_PORT > 65535)); then
+        log_warn "Invalid AIOStreams port; using 3000."
+        AIOSTREAMS_PORT=3000
+    fi
+
+    # Prefer the host's LAN address for generated addon links. A localhost URL
+    # works from the server itself but cannot be opened by a TV or phone.
+    local _lan_host=""
+    if command -v ip &>/dev/null; then
+        _lan_host=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i == "src") {print $(i+1); exit}}') || true
+    fi
+    if [[ -z "$_lan_host" ]] && command -v hostname &>/dev/null; then
+        _lan_host=$(hostname -I 2>/dev/null | awk '{print $1}') || true
+    fi
+    [[ "$_lan_host" =~ ^[0-9.]+$ ]] || _lan_host="localhost"
+    AIOSTREAMS_BASE_URL="${TORBOX_AIOSTREAMS_BASE_URL:-${EXISTING_AIOSTREAMS_BASE_URL:-http://${_lan_host}:${AIOSTREAMS_PORT}}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_AIOSTREAMS_BASE_URL:-}" ]]; then
+        echo "  Base URL is used in generated stream links. For LAN-only use,"
+        echo "  you can replace localhost with the server's LAN IP."
+        read -rp "  AIOStreams base URL [${AIOSTREAMS_BASE_URL}]: " _aio_base
+        AIOSTREAMS_BASE_URL="${_aio_base:-$AIOSTREAMS_BASE_URL}"
+    fi
+    if [[ ! "$AIOSTREAMS_BASE_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+        log_warn "Invalid AIOStreams base URL; using http://${_lan_host}:${AIOSTREAMS_PORT}."
+        AIOSTREAMS_BASE_URL="http://${_lan_host}:${AIOSTREAMS_PORT}"
+    fi
+
+    AIOSTREAMS_CACHE_BYTES="${TORBOX_AIOSTREAMS_CACHE_BYTES:-${EXISTING_AIOSTREAMS_CACHE_BYTES:-0}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_AIOSTREAMS_CACHE_BYTES:-}" ]]; then
+        echo "  Local segment cache (bytes; 0 keeps media off local disk)."
+        read -rp "  Cache size [${AIOSTREAMS_CACHE_BYTES}]: " _aio_cache
+        AIOSTREAMS_CACHE_BYTES="${_aio_cache:-$AIOSTREAMS_CACHE_BYTES}"
+    fi
+    if [[ ! "$AIOSTREAMS_CACHE_BYTES" =~ ^[0-9]+$ ]]; then
+        log_warn "Invalid AIOStreams disk-cache size; using 0 (no media cache)."
+        AIOSTREAMS_CACHE_BYTES=0
+    fi
+
+    AIOSTREAMS_USENET_MODE="${TORBOX_AIOSTREAMS_USENET_MODE:-${EXISTING_AIOSTREAMS_USENET_MODE:-}}"
+    if [[ -z "$AIOSTREAMS_USENET_MODE" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            AIOSTREAMS_USENET_MODE="both"
+        else
+            echo "  Usenet workflow"
+            echo "    1) Direct AIOStreams streaming + Radarr/Sonarr Usenet client"
+            echo "    2) Direct AIOStreams/Stremio streaming only"
+            echo "    3) Radarr/Sonarr Usenet client only"
+            read -rp "  Choose workflow [1]: " _aio_mode
+            case "${_aio_mode:-1}" in
+                1) AIOSTREAMS_USENET_MODE="both" ;;
+                2) AIOSTREAMS_USENET_MODE="direct" ;;
+                3) AIOSTREAMS_USENET_MODE="arr" ;;
+                *) log_warn "Invalid workflow; using both."; AIOSTREAMS_USENET_MODE="both" ;;
+            esac
+        fi
+    fi
+    case "$AIOSTREAMS_USENET_MODE" in
+        direct|arr|both) ;;
+        *) log_warn "Invalid AIOStreams workflow; using both."; AIOSTREAMS_USENET_MODE="both" ;;
+    esac
+
+    AIOSTREAMS_AUTH_USER="${TORBOX_AIOSTREAMS_USER:-${EXISTING_AIOSTREAMS_AUTH_USER:-aiostreams}}"
+    AIOSTREAMS_AUTH_PASS="${TORBOX_AIOSTREAMS_PASS:-${EXISTING_AIOSTREAMS_AUTH_PASS:-}}"
+    [[ -n "$AIOSTREAMS_AUTH_PASS" ]] || AIOSTREAMS_AUTH_PASS="$(_gen_admin_pass)"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_AIOSTREAMS_PASS:-}" && -z "${EXISTING_AIOSTREAMS_AUTH_PASS:-}" ]]; then
+        read -rsp "  AIOStreams login password [generated if empty]: " _aio_pass
+        echo
+        [[ -n "$_aio_pass" ]] && AIOSTREAMS_AUTH_PASS="$_aio_pass"
+    fi
+    if [[ -z "$AIOSTREAMS_AUTH_USER" || -z "$AIOSTREAMS_AUTH_PASS" || "$AIOSTREAMS_AUTH_USER" == *[:,=]* || "$AIOSTREAMS_AUTH_PASS" == *,* ]]; then
+        log_error "AIOStreams username/password is invalid. The username cannot contain ':', ',', or '=' and the password cannot contain ','."
+        exit 1
+    fi
+    AIOSTREAMS_AUTH="${AIOSTREAMS_AUTH_USER}:${AIOSTREAMS_AUTH_PASS}"
+
+    AIOSTREAMS_SECRET_KEY="${TORBOX_AIOSTREAMS_SECRET_KEY:-${EXISTING_AIOSTREAMS_SECRET_KEY:-}}"
+    [[ -n "$AIOSTREAMS_SECRET_KEY" ]] || AIOSTREAMS_SECRET_KEY="$(openssl rand -hex 32)"
+    if [[ ! "$AIOSTREAMS_SECRET_KEY" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        log_error "AIOStreams SECRET_KEY must be exactly 64 hexadecimal characters."
+        exit 1
+    fi
+
+    AIOSTREAMS_FUSE_ENABLED=false
+    if [[ "$AIOSTREAMS_USENET_MODE" == "arr" || "$AIOSTREAMS_USENET_MODE" == "both" ]]; then
+        AIOSTREAMS_FUSE_ENABLED=true
+        AIOSTREAMS_MOUNT_DIR="${TORBOX_AIOSTREAMS_MOUNT_DIR:-${EXISTING_AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}}"
+        if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_AIOSTREAMS_MOUNT_DIR:-}" ]]; then
+            read -rp "  AIOStreams FUSE mount path [${AIOSTREAMS_MOUNT_DIR}]: " _aio_mount
+            AIOSTREAMS_MOUNT_DIR="${_aio_mount:-$AIOSTREAMS_MOUNT_DIR}"
+        fi
+        if [[ "$AIOSTREAMS_MOUNT_DIR" != /mnt/* || "$AIOSTREAMS_MOUNT_DIR" == "$MOUNT_DIR" || "$AIOSTREAMS_MOUNT_DIR" =~ [^a-zA-Z0-9_./-] ]]; then
+            log_warn "AIOStreams mount must be a separate safe path under /mnt; using /mnt/aiostreams."
+            AIOSTREAMS_MOUNT_DIR="/mnt/aiostreams"
+        fi
+    else
+        # Do not advertise a completed-download mount to AIOStreams when the
+        # selected workflow is direct-only and no FUSE consumer is present.
+        AIOSTREAMS_MOUNT_DIR=""
+    fi
+
+    # Preserve an existing provider JSON on re-runs. On a fresh setup, prompt
+    # for Newshosting (or any other NNTP provider) without requiring it.
+    AIOSTREAMS_USENET_PROVIDERS="${TORBOX_AIOSTREAMS_USENET_PROVIDERS:-${EXISTING_AIOSTREAMS_USENET_PROVIDERS:-[]}}"
+    if [[ -n "${TORBOX_USENET_USER:-}" && -n "${TORBOX_USENET_PASS:-}" ]]; then
+        local _env_host="${TORBOX_USENET_HOST:-news.newshosting.com}"
+        local _env_port="${TORBOX_USENET_PORT:-563}"
+        local _env_connections="${TORBOX_USENET_CONNECTIONS:-20}"
+        local _env_tls="${TORBOX_USENET_TLS:-true}"
+        case "${_env_tls,,}" in
+            true|1|yes|y) _env_tls=true ;;
+            false|0|no|n) _env_tls=false ;;
+            *) log_warn "TORBOX_USENET_TLS must be true or false; using true."; _env_tls=true ;;
+        esac
+        if [[ "$_env_port" == "119" ]]; then _env_tls=false; fi
+        if [[ "$_env_port" =~ ^[0-9]+$ && "$_env_port" -ge 1 && "$_env_port" -le 65535 &&
+            "$_env_connections" =~ ^[0-9]+$ && "$_env_connections" -ge 1 ]]; then
+            AIOSTREAMS_USENET_PROVIDERS="$(jq -cn --arg host "$_env_host" --arg user "${TORBOX_USENET_USER}" --arg pass "${TORBOX_USENET_PASS}" --argjson port "$_env_port" --argjson connections "$_env_connections" --argjson tls "$_env_tls" '[{id:"primary",name:"Newshosting",host:$host,port:$port,tls:$tls,username:$user,password:$pass,maxConnections:$connections,priority:1,isBackup:false,enabled:true}]')"
+        else
+            log_warn "TORBOX_USENET_PORT and TORBOX_USENET_CONNECTIONS must be numeric; provider was not configured."
+        fi
+    fi
+    if [[ -z "${TORBOX_AIOSTREAMS_USENET_PROVIDERS:-}" && "$AIOSTREAMS_USENET_PROVIDERS" == "[]" && "$NON_INTERACTIVE" != "true" ]]; then
+        read -rp "  Configure an NNTP provider now (Newshosting default)? [Y/n]: " _provider_now
+        if [[ "${_provider_now,,}" != "n" ]]; then
+            local _host _port _tls _user _pass _connections
+            read -rp "  NNTP host [news.newshosting.com]: " _host
+            _host="${_host:-news.newshosting.com}"
+            read -rp "  NNTP SSL port [563]: " _port
+            _port="${_port:-563}"
+            read -rp "  NNTP username: " _user
+            read -rsp "  NNTP password: " _pass
+            echo
+            read -rp "  Maximum connections [20]: " _connections
+            _connections="${_connections:-20}"
+            _tls=true
+            if [[ "$_port" == "119" ]]; then _tls=false; fi
+            if [[ "$_port" == "119" ]]; then _tls=false; fi
+            if [[ -n "$_user" && -n "$_pass" && "$_port" =~ ^[0-9]+$ && "$_port" -ge 1 && "$_port" -le 65535 &&
+                "$_connections" =~ ^[0-9]+$ && "$_connections" -ge 1 ]]; then
+                AIOSTREAMS_USENET_PROVIDERS="$(jq -cn --arg host "$_host" --arg user "$_user" --arg pass "$_pass" --argjson port "$_port" --argjson connections "$_connections" --argjson tls "$_tls" '[{id:"primary",name:"Newshosting",host:$host,port:$port,tls:$tls,username:$user,password:$pass,maxConnections:$connections,priority:1,isBackup:false,enabled:true}]')"
+            else
+                log_warn "Provider details were incomplete; configure Usenet from the AIOStreams dashboard."
+            fi
+        fi
+    fi
+
+    AIOSTREAMS_NEWZNAB_URL="${TORBOX_NEWZNAB_URL:-${EXISTING_AIOSTREAMS_NEWZNAB_URL:-}}"
+    AIOSTREAMS_NEWZNAB_API_KEY="${TORBOX_NEWZNAB_API_KEY:-${EXISTING_AIOSTREAMS_NEWZNAB_API_KEY:-}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_NEWZNAB_URL:-}" && -z "${EXISTING_AIOSTREAMS_NEWZNAB_URL:-}" ]]; then
+        echo "  Optional Newznab indexer (AltHub or another provider)."
+        read -rp "  Newznab API URL (press Enter to configure later): " _newznab_url
+        if [[ -n "$_newznab_url" ]]; then
+            if [[ ! "$_newznab_url" =~ ^https?://[^[:space:]]+$ ]]; then
+                log_warn "Invalid Newznab URL; leaving it unset."
+            else
+                AIOSTREAMS_NEWZNAB_URL="$_newznab_url"
+                read -rsp "  Newznab API key: " AIOSTREAMS_NEWZNAB_API_KEY
+                echo
+            fi
+        fi
+    fi
+    if [[ -n "$AIOSTREAMS_NEWZNAB_URL" && ! "$AIOSTREAMS_NEWZNAB_URL" =~ ^https?://[^[:space:]]+$ ]]; then
+        AIOSTREAMS_NEWZNAB_URL=""
+        AIOSTREAMS_NEWZNAB_API_KEY=""
+    fi
+    if [[ -n "$AIOSTREAMS_USENET_PROVIDERS" ]] && ! jq -e '
+        type == "array" and all(.[];
+          ((.id | type) == "string" and (.id | length) > 0) and
+          ((.host | type) == "string" and (.host | length) > 0) and
+          ((.port | type) == "number" and (.port >= 1 and .port <= 65535)) and
+          ((.tls | type) == "boolean") and
+          ((.maxConnections | type) == "number" and .maxConnections >= 1) and
+          ((.priority | type) == "number")
+        )
+    ' <<<"$AIOSTREAMS_USENET_PROVIDERS" >/dev/null 2>&1; then
+        log_warn "AIOStreams NNTP provider JSON is invalid; leaving providers empty so setup can continue."
+        AIOSTREAMS_USENET_PROVIDERS="[]"
+    fi
+
+    log_info "AIOStreams enabled (${AIOSTREAMS_USENET_MODE} Usenet workflow, port ${AIOSTREAMS_PORT})."
+}
+
+# Configure Decypharr's native SABnzbd-compatible Usenet path. This remains
+# separate from AIOStreams so an install can use either service, both services,
+# or neither while retaining the TorBox qBittorrent path.
+gather_decypharr_usenet_config() {
+    local enabled="${TORBOX_DECYPHARR_USENET_ENABLED:-${EXISTING_DECYPHARR_USENET_ENABLED:-}}"
+    if [[ -z "$enabled" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            enabled=false
+        else
+            echo -e "${BOLD}Decypharr Usenet${NC} (optional)"
+            echo "  Adds Decypharr's SABnzbd-compatible client to Radarr/Sonarr."
+            echo "  Torrents continue using TorBox through the qBittorrent client."
+            read -rp "  Configure native Decypharr Usenet now? [y/N]: " _dec_usenet_enable
+            [[ "${_dec_usenet_enable,,}" == "y" || "${_dec_usenet_enable,,}" == "yes" ]] && enabled=true || enabled=false
+        fi
+    fi
+    case "${enabled,,}" in
+        1|true|yes|y) DECYPHARR_USENET_ENABLED=true ;;
+        *) DECYPHARR_USENET_ENABLED=false; return 0 ;;
+    esac
+
+    DECYPHARR_USENET_DISK_PATH="${TORBOX_DECYPHARR_USENET_DISK_PATH:-${EXISTING_DECYPHARR_USENET_DISK_PATH:-}}"
+    # Empty is intentional: Decypharr keeps its bounded streaming window in
+    # memory and exposes symlinks/virtual paths instead of storing media files.
+    if [[ -n "$DECYPHARR_USENET_DISK_PATH" && "$DECYPHARR_USENET_DISK_PATH" != /* ]]; then
+        log_warn "TORBOX_DECYPHARR_USENET_DISK_PATH must be absolute; using empty (zero media storage)."
+        DECYPHARR_USENET_DISK_PATH=""
+    fi
+    DECYPHARR_USENET_PRIORITY="${TORBOX_DECYPHARR_USENET_PRIORITY:-${EXISTING_DECYPHARR_USENET_PRIORITY:-0}}"
+    if [[ ! "$DECYPHARR_USENET_PRIORITY" =~ ^[0-9]+$ ]]; then
+        log_warn "TORBOX_DECYPHARR_USENET_PRIORITY must be numeric; using 0 (preferred)."
+        DECYPHARR_USENET_PRIORITY=0
+    fi
+
+    DECYPHARR_USENET_PROVIDERS="${TORBOX_DECYPHARR_USENET_PROVIDERS:-${EXISTING_DECYPHARR_USENET_PROVIDERS:-[]}}"
+
+    # Reuse AIOStreams credentials when that optional service was configured.
+    if [[ "$DECYPHARR_USENET_PROVIDERS" == "[]" && "$AIOSTREAMS_USENET_PROVIDERS" != "[]" ]]; then
+        DECYPHARR_USENET_PROVIDERS="$(jq -c 'map({host,port,username,password,backbone:(.backbone // ""),ssl:(.ssl // .tls // true),max_connections:(.max_connections // .maxConnections // 20),priority:(.priority // 1),backup:(.backup // .isBackup // false)})' <<<"$AIOSTREAMS_USENET_PROVIDERS")"
+    fi
+
+    # Non-interactive installs can reuse the single provider variables used by
+    # the AIOStreams setup, without requiring a second credential prompt.
+    if [[ "$DECYPHARR_USENET_PROVIDERS" == "[]" && -n "${TORBOX_USENET_USER:-}" && -n "${TORBOX_USENET_PASS:-}" ]]; then
+        local _host="${TORBOX_USENET_HOST:-news.newshosting.com}" _port="${TORBOX_USENET_PORT:-563}"
+        local _connections="${TORBOX_USENET_CONNECTIONS:-20}" _tls="${TORBOX_USENET_TLS:-true}"
+        [[ "$_port" == "119" ]] && _tls=false
+        if [[ "$_port" =~ ^[0-9]+$ && "$_port" -ge 1 && "$_port" -le 65535 && "$_connections" =~ ^[0-9]+$ && "$_connections" -ge 1 ]]; then
+            DECYPHARR_USENET_PROVIDERS="$(jq -cn --arg host "$_host" --arg user "${TORBOX_USENET_USER}" --arg pass "${TORBOX_USENET_PASS}" --argjson port "$_port" --argjson connections "$_connections" --argjson ssl "$_tls" '[{host:$host,port:$port,username:$user,password:$pass,backbone:"",ssl:$ssl,max_connections:$connections,priority:1,backup:false}]')"
+        else
+            log_warn "TORBOX_USENET_PORT and TORBOX_USENET_CONNECTIONS are invalid; provider was not configured."
+        fi
+    fi
+
+    if [[ "$DECYPHARR_USENET_PROVIDERS" == "[]" && "$NON_INTERACTIVE" != "true" ]]; then
+        local _host _port _user _pass _connections _backbone _tls
+        read -rp "  Primary NNTP host [news.newshosting.com]: " _host
+        _host="${_host:-news.newshosting.com}"
+        read -rp "  Primary NNTP SSL port [563]: " _port
+        _port="${_port:-563}"
+        read -rp "  Primary NNTP username: " _user
+        read -rsp "  Primary NNTP password: " _pass
+        echo
+        read -rp "  Provider backbone (optional): " _backbone
+        read -rp "  Maximum connections [20]: " _connections
+        _connections="${_connections:-20}"
+        _tls=true; [[ "$_port" == "119" ]] && _tls=false
+        if [[ -n "$_user" && -n "$_pass" && "$_port" =~ ^[0-9]+$ && "$_port" -ge 1 && "$_port" -le 65535 && "$_connections" =~ ^[0-9]+$ && "$_connections" -ge 1 ]]; then
+            DECYPHARR_USENET_PROVIDERS="$(jq -cn --arg host "$_host" --arg user "$_user" --arg pass "$_pass" --arg backbone "$_backbone" --argjson port "$_port" --argjson connections "$_connections" --argjson ssl "$_tls" '[{host:$host,port:$port,username:$user,password:$pass,backbone:$backbone,ssl:$ssl,max_connections:$connections,priority:1,backup:false}]')"
+            read -rp "  Add an optional backup NNTP provider? [y/N]: " _add_backup
+            if [[ "${_add_backup,,}" == "y" || "${_add_backup,,}" == "yes" ]]; then
+                local _bhost _bport _buser _bpass _bconnections _bbackbone _bssl
+                read -rp "  Backup NNTP host: " _bhost
+                read -rp "  Backup NNTP SSL port [563]: " _bport
+                _bport="${_bport:-563}"
+                read -rp "  Backup NNTP username: " _buser
+                read -rsp "  Backup NNTP password: " _bpass
+                echo
+                read -rp "  Backup provider backbone (optional): " _bbackbone
+                read -rp "  Backup maximum connections [10]: " _bconnections
+                _bconnections="${_bconnections:-10}"
+                _bssl=true; [[ "$_bport" == "119" ]] && _bssl=false
+                if [[ -n "$_bhost" && -n "$_buser" && -n "$_bpass" && "$_bport" =~ ^[0-9]+$ && "$_bport" -ge 1 && "$_bport" -le 65535 && "$_bconnections" =~ ^[0-9]+$ && "$_bconnections" -ge 1 ]]; then
+                    DECYPHARR_USENET_PROVIDERS="$(jq -c --arg host "$_bhost" --arg user "$_buser" --arg pass "$_bpass" --arg backbone "$_bbackbone" --argjson port "$_bport" --argjson connections "$_bconnections" --argjson ssl "$_bssl" '. + [{host:$host,port:$port,username:$user,password:$pass,backbone:$backbone,ssl:$ssl,max_connections:$connections,priority:2,backup:true}]' <<<"$DECYPHARR_USENET_PROVIDERS")"
+                else
+                    log_warn "Backup provider details were incomplete; keeping the primary provider only."
+                fi
+            fi
+        else
+            log_warn "Primary provider details were incomplete; Decypharr Usenet remains unconfigured."
+        fi
+    fi
+
+    if ! jq -e 'type == "array" and length > 0 and all(.[]; (.host|type)=="string" and (.host|length)>0 and (.port|type)=="number" and (.port>=1 and .port<=65535) and (.username|type)=="string" and (.password|type)=="string" and (.ssl|type)=="boolean" and (.max_connections|type)=="number" and (.max_connections>=1) and (.priority|type)=="number" and (.backup|type)=="boolean")' <<<"$DECYPHARR_USENET_PROVIDERS" >/dev/null 2>&1; then
+        log_warn "Decypharr Usenet provider JSON is invalid or empty; native Usenet will be disabled."
+        DECYPHARR_USENET_ENABLED=false
+        DECYPHARR_USENET_PROVIDERS="[]"
+    fi
+    log_info "Decypharr native Usenet ${DECYPHARR_USENET_ENABLED} (Arr priority ${DECYPHARR_USENET_PRIORITY}, media disk path: ${DECYPHARR_USENET_DISK_PATH:-memory})."
+}
 
 gather_config() {
     log_section "Configuration"
@@ -638,6 +996,10 @@ gather_config() {
         fi
         log_info "Silo enabled with GPU mode: ${SILO_GPU}."
     fi
+
+    echo ""
+    gather_aiostreams_config
+    gather_decypharr_usenet_config
 
     echo ""
 
@@ -1080,6 +1442,9 @@ create_directories() {
 
     mkdir -p "${INSTALL_DIR}"
     mkdir -p "${CONFIG_DIR}"/{prowlarr,radarr,sonarr,bazarr,seerr,decypharr}
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        mkdir -p "${CONFIG_DIR}/aiostreams"
+    fi
     mkdir -p "${DATA_DIR}"/{media/{movies,tv},downloads/{radarr,sonarr}}
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
@@ -1107,6 +1472,10 @@ create_directories() {
         sudo mount --bind "${MOUNT_DIR}" "${MOUNT_DIR}" 2>/dev/null || true
     fi
     sudo mount --make-shared "${MOUNT_DIR}" 2>/dev/null || true
+    if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+        sudo mkdir -p "${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}"
+        sudo mount --make-shared /mnt 2>/dev/null || true
+    fi
     if findmnt -n -o PROPAGATION "${MOUNT_DIR}" 2>/dev/null | grep -q "shared"; then
         log_info "Mount propagation configured (shared)."
     else
@@ -1152,6 +1521,16 @@ generate_decypharr_config() {
                    | (.debrids[]? | select(.name == "torbox" and .rate_limit == "55/hour")).rate_limit = "250/minute"' \
                 "${CONFIG_DIR}/decypharr/config.json" >"$_tmp" 2>/dev/null; then
                 mv "$_tmp" "${CONFIG_DIR}/decypharr/config.json"
+                if [[ "${DECYPHARR_USENET_ENABLED:-false}" == "true" ]]; then
+                    local _usenet_tmp="${CONFIG_DIR}/decypharr/config.json.usenet.tmp.$$"
+                    if jq --argjson providers "${DECYPHARR_USENET_PROVIDERS:-[]}" --arg disk "${DECYPHARR_USENET_DISK_PATH:-}" '.usenet = {providers: $providers, disk_path: $disk}' \
+                        "${CONFIG_DIR}/decypharr/config.json" >"$_usenet_tmp" 2>/dev/null; then
+                        mv "$_usenet_tmp" "${CONFIG_DIR}/decypharr/config.json"
+                    else
+                        rm -f "$_usenet_tmp"
+                        log_warn "Could not update existing Decypharr Usenet settings; old provider settings retained."
+                    fi
+                fi
                 chmod 600 "${CONFIG_DIR}/decypharr/config.json"
                 log_info "Refreshed TorBox API key in existing Decypharr config (other settings preserved)."
             else
@@ -1177,31 +1556,15 @@ generate_decypharr_config() {
         exit 1
     fi
 
-    cat >"${CONFIG_DIR}/decypharr/config.json" <<DECYPHARR_EOF
-{
-  "debrids": [
-    {
-      "name": "torbox",
-      "api_key": "${TORBOX_API_KEY}",
-      "folder": "/mnt/remote/torbox/__all__",
-      "rate_limit": "250/minute",
-      "use_webdav": true
-    }
-  ],
-  "rclone": {
-    "enabled": true,
-    "mount_path": "/mnt/remote"
-  },
-  "qbittorrent": {
-    "download_folder": "/data/downloads/",
-    "categories": ["sonarr", "radarr"]
-  },
-  "username": "${DECYPHARR_USER}",
-  "password": "${DECYPHARR_PASS}",
-  "port": "8282",
-  "log_level": "info"
-}
-DECYPHARR_EOF
+    jq -n \
+        --arg key "${TORBOX_API_KEY}" \
+        --arg user "${DECYPHARR_USER}" \
+        --arg pass "${DECYPHARR_PASS}" \
+        --argjson usenet_enabled "${DECYPHARR_USENET_ENABLED:-false}" \
+        --argjson usenet_providers "${DECYPHARR_USENET_PROVIDERS:-[]}" \
+        --arg usenet_disk "${DECYPHARR_USENET_DISK_PATH:-}" \
+        '{debrids:[{name:"torbox",api_key:$key,folder:"/mnt/remote/torbox/__all__",rate_limit:"250/minute",use_webdav:true}],rclone:{enabled:true,mount_path:"/mnt/remote"},qbittorrent:{download_folder:"/data/downloads/",categories:["sonarr","radarr"]},username:$user,password:$pass,port:"8282",log_level:"info"} | if $usenet_enabled then .usenet={providers:$usenet_providers,disk_path:$usenet_disk} else . end' \
+        >"${CONFIG_DIR}/decypharr/config.json"
 
     chmod 600 "${CONFIG_DIR}/decypharr/config.json"
     log_info "Decypharr config written with pre-seeded credentials."
@@ -1315,6 +1678,9 @@ generate_env_file() {
     if [[ "${SILO_ENABLED:-false}" == "true" && "${compose_profile}" != "silo" ]]; then
         compose_profile+=",silo"
     fi
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" && "${compose_profile}" != *aiostreams* ]]; then
+        compose_profile+=",aiostreams"
+    fi
 
     cat >"${ENV_FILE}" <<ENV_EOF
 # TorBox Media Server - Environment Configuration
@@ -1350,6 +1716,10 @@ BAZARR_API_KEY="${BAZARR_API_KEY}"
 # Decypharr credentials (pre-seeded)
 DECYPHARR_USER="${DECYPHARR_USER:-torbox}"
 DECYPHARR_PASS="${DECYPHARR_PASS:-}"
+DECYPHARR_USENET_ENABLED="${DECYPHARR_USENET_ENABLED:-false}"
+DECYPHARR_USENET_PROVIDERS=$(dotenv_quote "${DECYPHARR_USENET_PROVIDERS:-[]}")
+DECYPHARR_USENET_DISK_PATH=$(dotenv_quote "${DECYPHARR_USENET_DISK_PATH:-}")
+DECYPHARR_USENET_PRIORITY="${DECYPHARR_USENET_PRIORITY:-0}"
 ENV_EOF
 
     if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
@@ -1368,6 +1738,45 @@ ENV_EOF
             echo "SILO_ADMIN_PASS=\"${SILO_ADMIN_PASS:-}\""
             [[ -n "${EXISTING_SILO_WORK_DIR:-}" ]] && echo "SILO_WORK_DIR=\"${EXISTING_SILO_WORK_DIR}\""
             [[ -n "${EXISTING_SILO_OMNIBUS_IMAGE:-}" ]] && echo "SILO_OMNIBUS_IMAGE=\"${EXISTING_SILO_OMNIBUS_IMAGE}\""
+        } >>"${ENV_FILE}"
+    fi
+
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        # AIOStreams uses these runtime values for its built-in Usenet engine.
+        # The indexer URL/key are retained for the dashboard because Newznab
+        # addons are user configuration rather than bootstrap environment.
+        if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+            AIOSTREAMS_ARR_INSTANCES="$(jq -cn \
+                --arg rkey "${RADARR_API_KEY}" --arg skey "${SONARR_API_KEY}" \
+                '[{id:"radarr",name:"Radarr",type:"radarr",url:"http://radarr:7878",apiKey:$rkey,enabled:true,categories:["radarr"]},{id:"sonarr",name:"Sonarr",type:"sonarr",url:"http://sonarr:8989",apiKey:$skey,enabled:true,categories:["sonarr"]}]')"
+        else
+            AIOSTREAMS_ARR_INSTANCES="[]"
+        fi
+        {
+            echo ""
+            echo "# AIOStreams (optional; keep this .env private)"
+            printf 'AIOSTREAMS_ENABLED=%s\n' "$(dotenv_quote "${AIOSTREAMS_ENABLED}")"
+            printf 'AIOSTREAMS_PORT=%s\n' "$(dotenv_quote "${AIOSTREAMS_PORT}")"
+            printf 'AIOSTREAMS_BASE_URL=%s\n' "$(dotenv_quote "${AIOSTREAMS_BASE_URL}")"
+            printf 'AIOSTREAMS_CACHE_BYTES=%s\n' "$(dotenv_quote "${AIOSTREAMS_CACHE_BYTES}")"
+            printf 'AIOSTREAMS_SECRET_KEY=%s\n' "$(dotenv_quote "${AIOSTREAMS_SECRET_KEY}")"
+            printf 'AIOSTREAMS_AUTH_USER=%s\n' "$(dotenv_quote "${AIOSTREAMS_AUTH_USER}")"
+            printf 'AIOSTREAMS_AUTH_PASS=%s\n' "$(dotenv_quote "${AIOSTREAMS_AUTH_PASS}")"
+            printf 'AIOSTREAMS_AUTH=%s\n' "$(dotenv_quote "${AIOSTREAMS_AUTH}")"
+            printf 'AIOSTREAMS_AUTH_PERMISSIONS=%s\n' "$(dotenv_quote "${AIOSTREAMS_AUTH_USER}=admin")"
+            printf 'AIOSTREAMS_USENET_MODE=%s\n' "$(dotenv_quote "${AIOSTREAMS_USENET_MODE}")"
+            printf 'AIOSTREAMS_USENET_PROVIDERS=%s\n' "$(dotenv_quote "${AIOSTREAMS_USENET_PROVIDERS}")"
+            printf 'AIOSTREAMS_SABNZBD_API_ENABLED=%s\n' '"true"'
+            printf 'AIOSTREAMS_IMPORT_MODE=%s\n' '"symlink"'
+            local _aio_recheck_scope="off"
+            [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]] && _aio_recheck_scope="sabnzbd"
+            printf 'AIOSTREAMS_RECHECK_SCOPE=%s\n' "$(dotenv_quote "${_aio_recheck_scope}")"
+            printf 'AIOSTREAMS_ARR_INSTANCES=%s\n' "$(dotenv_quote "${AIOSTREAMS_ARR_INSTANCES}")"
+            printf 'AIOSTREAMS_FUSE_ENABLED=%s\n' "$(dotenv_quote "${AIOSTREAMS_FUSE_ENABLED}")"
+            printf 'AIOSTREAMS_MOUNT_DIR=%s\n' "$(dotenv_quote "${AIOSTREAMS_MOUNT_DIR}")"
+            printf 'AIOSTREAMS_HOST_PARENT=%s\n' '"/mnt"'
+            printf 'AIOSTREAMS_NEWZNAB_URL=%s\n' "$(dotenv_quote "${AIOSTREAMS_NEWZNAB_URL}")"
+            printf 'AIOSTREAMS_NEWZNAB_API_KEY=%s\n' "$(dotenv_quote "${AIOSTREAMS_NEWZNAB_API_KEY}")"
         } >>"${ENV_FILE}"
     fi
 
@@ -1429,6 +1838,52 @@ generate_docker_compose() {
     # Copy static compose file and Dockerfile from repo to install directory
     cp "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
     cp "${SCRIPT_DIR}/Dockerfile.decypharr" "${INSTALL_DIR}/Dockerfile.decypharr"
+
+    # AIOStreams is kept in small Compose overlays so direct-streaming users do
+    # not receive FUSE privileges or extra bind mounts unless they select the
+    # Radarr/Sonarr Usenet workflow.
+    rm -f "${INSTALL_DIR}/docker-compose.aiostreams.yml" "${INSTALL_DIR}/docker-compose.aiostreams-fuse.yml"
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        cp "${SCRIPT_DIR}/docker-compose.aiostreams.yml" "${INSTALL_DIR}/docker-compose.aiostreams.yml"
+        if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+            cp "${SCRIPT_DIR}/docker-compose.aiostreams-fuse.yml" "${INSTALL_DIR}/docker-compose.aiostreams-fuse.yml"
+        fi
+        local _compose_files="${EXISTING_COMPOSE_FILE:-docker-compose.yml}"
+        # Remove stale copies of our optional overlays before appending the
+        # current set. Preserve unrelated operator overlays.
+        _compose_files=":${_compose_files}:"
+        _compose_files="${_compose_files//:docker-compose.aiostreams.yml:/:}"
+        _compose_files="${_compose_files//:docker-compose.aiostreams-fuse.yml:/:}"
+        _compose_files="${_compose_files#:}"
+        _compose_files="${_compose_files%:}"
+        _compose_files="${_compose_files}:docker-compose.aiostreams.yml"
+        if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+            _compose_files+="::docker-compose.aiostreams-fuse.yml"
+            _compose_files="${_compose_files//::/:}"
+        fi
+        local _env_tmp
+        _env_tmp=$(mktemp "${ENV_FILE}.aio.XXXXXX")
+        chmod 600 "${_env_tmp}"
+        sed -E '/^COMPOSE_FILE=/d' "${ENV_FILE}" >"${_env_tmp}"
+        printf 'COMPOSE_FILE=%s\n' "$(dotenv_quote "${_compose_files}")" >>"${_env_tmp}"
+        mv "${_env_tmp}" "${ENV_FILE}"
+        chmod 600 "${ENV_FILE}"
+    elif [[ -n "${EXISTING_COMPOSE_FILE:-}" ]]; then
+        # A re-run that disables AIOStreams should stop including old overlays.
+        local _compose_files="${EXISTING_COMPOSE_FILE}"
+        _compose_files=":${_compose_files}:"
+        _compose_files="${_compose_files//:docker-compose.aiostreams.yml:/:}"
+        _compose_files="${_compose_files//:docker-compose.aiostreams-fuse.yml:/:}"
+        _compose_files="${_compose_files#:}"
+        _compose_files="${_compose_files%:}"
+        local _env_tmp
+        _env_tmp=$(mktemp "${ENV_FILE}.aio.XXXXXX")
+        chmod 600 "${_env_tmp}"
+        sed -E '/^COMPOSE_FILE=/d' "${ENV_FILE}" >"${_env_tmp}"
+        [[ -n "${_compose_files}" ]] && printf 'COMPOSE_FILE=%s\n' "$(dotenv_quote "${_compose_files}")" >>"${_env_tmp}"
+        mv "${_env_tmp}" "${ENV_FILE}"
+        chmod 600 "${ENV_FILE}"
+    fi
 
     # Ensure no ghost overrides remain from previous installations
     rm -f "${INSTALL_DIR}/docker-compose.override.yml"
@@ -1617,6 +2072,11 @@ ensure_mount_propagation() {
         sudo bash -c 'findmnt -n "$1" >/dev/null 2>&1 || mount --bind "$1" "$1"' _ "${mount_dir}" 2>/dev/null || true
         sudo mount --make-shared "${mount_dir}" 2>/dev/null || true
     fi
+    if [[ "$(env_val AIOSTREAMS_FUSE_ENABLED || true)" == "true" ]]; then
+        # AIOStreams creates its own FUSE mount under /mnt. The parent must be
+        # shared so Radarr/Sonarr and the media server see that mount.
+        sudo mount --make-shared /mnt 2>/dev/null || true
+    fi
 }
 
 pull_remote_images() {
@@ -1630,6 +2090,7 @@ pull_remote_images() {
     for server in plex jellyfin silo; do
         case ",${profile}," in *,"$server",*) services+=("$server") ;; esac
     done
+    case ",${profile}," in *,aiostreams,*) services+=(aiostreams) ;; esac
     compose_cmd pull "${services[@]}"
 }
 
@@ -1656,6 +2117,7 @@ show_help() {
     echo "  backup      Back up configs and .env (briefly stops Silo if enabled)"
     echo "  restore     Restore from a backup (list or specify timestamp)"
     echo "  health      Check health of all services"
+    echo "  AIOStreams  Optional Usenet dashboard is shown by 'urls' and 'keys' when enabled"
     echo "  shell <svc> Open a shell in a service container"
     echo "  version     Show version"
     echo "  help        Show this help"
@@ -1682,6 +2144,11 @@ show_urls() {
             printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "Silo" "$NC" "${silo_port:-8090}"
             ;;
     esac
+    if [[ "$(env_val AIOSTREAMS_ENABLED || true)" == "true" ]]; then
+        local aio_port
+        aio_port="$(env_val AIOSTREAMS_PORT || true)"
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "AIOStreams" "$NC" "${aio_port:-3000}"
+    fi
     echo "  From another device, replace localhost with this server's LAN IP."
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
 }
@@ -1715,6 +2182,12 @@ cmd_keys() {
     echo -e "  ${BOLD}Sonarr${NC}    $(mask_val "$(env_val SONARR_API_KEY)")"
     echo -e "  ${BOLD}Prowlarr${NC}  $(mask_val "$(env_val PROWLARR_API_KEY)")"
     echo -e "  ${BOLD}Bazarr${NC}    $(mask_val "$(env_val BAZARR_API_KEY)")"
+    if [[ "$(env_val AIOSTREAMS_ENABLED || true)" == "true" ]]; then
+        echo -e "  ${BOLD}AIOStreams${NC} user: $(env_val AIOSTREAMS_AUTH_USER)  pass: $(mask_val "$(env_val AIOSTREAMS_AUTH_PASS)")"
+        if [[ -n "$(env_val AIOSTREAMS_NEWZNAB_API_KEY)" ]]; then
+            echo -e "  ${BOLD}Newznab${NC}   $(mask_val "$(env_val AIOSTREAMS_NEWZNAB_API_KEY)")"
+        fi
+    fi
 
     _radarr_pass="$(env_val RADARR_ADMIN_PASS)"
     _sonarr_pass="$(env_val SONARR_ADMIN_PASS)"
@@ -1887,7 +2360,7 @@ case "${1:-help}" in
         mkdir -p "${backup_dir}"
         chmod 700 "${backup_dir}"
         cp -a "${ENV_FILE}" "${backup_dir}/" 2>/dev/null || true
-        cp -a "${BASE_COMPOSE_FILE}" "${backup_dir}/" 2>/dev/null || true
+        cp -a "${SCRIPT_DIR}"/docker-compose*.yml "${backup_dir}/" 2>/dev/null || true
         cp -ra "${SCRIPT_DIR}/configs" "${backup_dir}/" 2>/dev/null || true
         echo -e "${GREEN}Backup saved to: ${backup_dir}${NC}"
         ;;
@@ -1959,7 +2432,11 @@ case "${1:-help}" in
         compose_cmd down 2>/dev/null || true
         # Restore files
         [[ -f "${target}/.env" ]] && cp -a "${target}/.env" "${ENV_FILE}" && echo "  Restored .env"
-        [[ -f "${target}/docker-compose.yml" ]] && cp -a "${target}/docker-compose.yml" "${BASE_COMPOSE_FILE}" && echo "  Restored docker-compose.yml"
+        for compose_backup in "${target}"/docker-compose*.yml; do
+            [[ -f "${compose_backup}" ]] || continue
+            cp -a "${compose_backup}" "${SCRIPT_DIR}/"
+            echo "  Restored $(basename "${compose_backup}")"
+        done
         [[ -d "${target}/configs" ]] && cp -ra "${target}/configs" "${SCRIPT_DIR}/" && \
             sudo chown -R "$(env_val PUID):$(env_val PGID)" "${SCRIPT_DIR}/configs" "${SCRIPT_DIR}/data" 2>/dev/null && \
             echo "  Restored configs/"
@@ -1978,12 +2455,20 @@ case "${1:-help}" in
                 echo -e "  ${RED}✗${NC} ${SVC_LABELS[$svc]} (port ${SVC_PORTS[$svc]}) — not reachable"
             fi
         done
+        if [[ "$(env_val AIOSTREAMS_ENABLED || true)" == "true" ]]; then
+            _aio_port="$(env_val AIOSTREAMS_PORT || echo 3000)"
+            if curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "http://localhost:${_aio_port}" 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} AIOStreams (port ${_aio_port}) — reachable"
+            else
+                echo -e "  ${RED}✗${NC} AIOStreams (port ${_aio_port}) — not reachable"
+            fi
+        fi
         echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
         ;;
     shell)
         if [[ -z "${2:-}" ]]; then
             echo -e "${YELLOW}Usage: ./manage.sh shell <service-name>${NC}"
-            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr plex jellyfin silo"
+            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr aiostreams plex jellyfin silo"
             exit 1
         fi
         compose_cmd exec "$2" /bin/bash 2>/dev/null || compose_cmd exec "$2" /bin/sh
@@ -2044,6 +2529,7 @@ EnvironmentFile=${ENV_FILE}
 # Guard with findmnt to prevent mount stacking on repeated restarts
 ExecStartPre=/bin/bash -c "findmnt -n '\$MOUNT_DIR' >/dev/null 2>&1 || mount --bind '\$MOUNT_DIR' '\$MOUNT_DIR'"
 ExecStartPre=/bin/bash -c "mount --make-shared '\$MOUNT_DIR'"
+ExecStartPre=/bin/bash -c "mount --make-shared /mnt || true"
 
 # Step 2: Start all containers (foreground so systemd tracks the process)
 ExecStart=${docker_bin} ${compose_args} --env-file "${ENV_FILE}" up --build --remove-orphans
@@ -2079,6 +2565,97 @@ SYSTEMD_EOF
 #  (download clients, root folders, media management, naming, quality profiles,
 #   Prowlarr apps & proxy)
 # ============================================================================
+
+configure_decypharr_usenet_download_client() {
+    local name="$1" url="$2" api_key="$3" container="$4" arr_port="$5"
+    [[ "${DECYPHARR_USENET_ENABLED:-false}" == "true" ]] || return 0
+    if [[ "${HAS_JQ:-false}" != "true" ]]; then
+        log_warn "  Decypharr Usenet client for ${name} requires jq; add it manually in Download Clients."
+        return 1
+    fi
+
+    local category_field="movieCategory"
+    [[ "$name" == "Sonarr" ]] && category_field="tvCategory"
+    local client_name="Decypharr Usenet"
+    local existing
+    existing=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" \
+        "${url}/api/v3/downloadclient" 2>/dev/null) || true
+
+    local dc_json
+    dc_json=$(jq -cn \
+        --arg name "$client_name" --arg host "decypharr" --arg arr_host "http://${container}:${arr_port}" \
+        --arg password "${api_key}" --arg category "$container" --arg category_field "$category_field" \
+        --argjson priority "${DECYPHARR_USENET_PRIORITY:-0}" \
+        '{name:$name,implementation:"Sabnzbd",configContract:"SabnzbdSettings",protocol:"usenet",enable:true,priority:$priority,removeCompletedDownloads:true,removeFailedDownloads:true,fields:[{name:"host",value:$host},{name:"port",value:8282},{name:"useSsl",value:false},{name:"urlBase",value:"/sabnzbd"},{name:"apiKey",value:""},{name:"username",value:$arr_host},{name:"password",value:$password},{name:$category_field,value:$category},{name:"removeCompletedDownloads",value:true},{name:"removeFailedDownloads",value:true}],tags:[]}')
+
+    if echo "$existing" | jq -e --arg n "$client_name" '.[] | select(.name == $n)' >/dev/null 2>&1; then
+        local client_id current updated
+        client_id=$(echo "$existing" | jq -r --arg n "$client_name" '.[] | select(.name == $n) | .id' | head -1)
+        current=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" "${url}/api/v3/downloadclient/${client_id}" 2>/dev/null) || true
+        updated=$(echo "$current" | jq --arg password "${api_key}" --arg arr_host "http://${container}:${arr_port}" --argjson priority "${DECYPHARR_USENET_PRIORITY:-0}" '(.fields[] | select(.name == "password")).value = $password | (.fields[] | select(.name == "username")).value = $arr_host | .priority = $priority' 2>/dev/null) || true
+        if [[ -n "$updated" ]] && curl -sf --connect-timeout 5 --max-time 15 -X PUT -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" "${url}/api/v3/downloadclient/${client_id}?forceSave=true" -d "$updated" -o /dev/null 2>/dev/null; then
+            log_info "  Decypharr Usenet client refreshed for ${name} (priority ${DECYPHARR_USENET_PRIORITY})."
+        else
+            log_warn "  Failed to refresh Decypharr Usenet client for ${name}."
+        fi
+    elif curl -sf --connect-timeout 5 --max-time 15 -X POST -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" \
+        "${url}/api/v3/downloadclient?forceSave=true" -d "$dc_json" -o /dev/null 2>/dev/null; then
+        log_info "  Decypharr Usenet client added to ${name} (priority ${DECYPHARR_USENET_PRIORITY})."
+    else
+        log_warn "  Failed to add Decypharr Usenet client to ${name}; add SABnzbd manually if needed."
+        return 1
+    fi
+}
+
+configure_aiostreams_download_client() {
+    local name="$1" url="$2" api_key="$3" container="$4"
+    [[ "${AIOSTREAMS_ENABLED:-false}" == "true" && "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]] || return 0
+    if [[ "${HAS_JQ:-false}" != "true" ]]; then
+        log_warn "  AIOStreams Usenet client for ${name} requires jq; add it manually in Download Clients."
+        return 1
+    fi
+
+    local category_field="movieCategory"
+    [[ "$name" == "Sonarr" ]] && category_field="tvCategory"
+    local client_name="AIOStreams Usenet"
+    local existing
+    existing=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" \
+        "${url}/api/v3/downloadclient" 2>/dev/null) || true
+
+    if echo "$existing" | jq -e --arg n "$client_name" '.[] | select(.name == $n)' >/dev/null 2>&1; then
+        local client_id current updated
+        client_id=$(echo "$existing" | jq -r --arg n "$client_name" '.[] | select(.name == $n) | .id' | head -1)
+        current=$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" \
+            "${url}/api/v3/downloadclient/${client_id}" 2>/dev/null) || true
+        if [[ -n "$current" ]]; then
+            updated=$(echo "$current" | jq --arg key "${AIOSTREAMS_AUTH}" \
+                '(.fields[] | select(.name == "apiKey")).value = $key' 2>/dev/null) || true
+            if [[ -n "$updated" ]]; then
+                curl -sf --connect-timeout 5 --max-time 15 -X PUT \
+                    -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" \
+                    "${url}/api/v3/downloadclient/${client_id}?forceSave=true" \
+                    -d "$updated" -o /dev/null 2>/dev/null &&
+                    log_info "  AIOStreams Usenet client refreshed for ${name}." ||
+                    log_warn "  Failed to refresh AIOStreams Usenet client for ${name}."
+            fi
+        fi
+        return 0
+    fi
+
+    local dc_json
+    dc_json=$(jq -cn \
+        --arg name "$client_name" --arg host "aiostreams" --arg key "${AIOSTREAMS_AUTH}" \
+        --arg category "$container" --arg category_field "$category_field" \
+        '{name:$name,implementation:"Sabnzbd",configContract:"SabnzbdSettings",protocol:"usenet",enable:true,priority:2,removeCompletedDownloads:true,removeFailedDownloads:true,fields:[{name:"host",value:$host},{name:"port",value:3000},{name:"useSsl",value:false},{name:"urlBase",value:"/api/v1/sabnzbd"},{name:"apiKey",value:$key},{name:"username",value:""},{name:"password",value:""},{name:$category_field,value:$category},{name:"removeCompletedDownloads",value:true},{name:"removeFailedDownloads",value:true}],tags:[]}')
+    if curl -sf --connect-timeout 5 --max-time 15 -X POST \
+        -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" \
+        "${url}/api/v3/downloadclient?forceSave=true" -d "$dc_json" -o /dev/null 2>/dev/null; then
+        log_info "  AIOStreams Usenet client added to ${name}."
+    else
+        log_warn "  Failed to add AIOStreams Usenet client to ${name}; add SABnzbd manually if needed."
+        return 1
+    fi
+}
 
 # Helper: Configure a Radarr/Sonarr service (download client, root folder, media mgmt, naming, quality)
 configure_arr_service() {
@@ -2153,6 +2730,9 @@ DCJSON_EOF
             log_info "  ${name} already has Decypharr download client configured (could not refresh password)."
         fi
     fi
+
+    configure_decypharr_usenet_download_client "$name" "$url" "$api_key" "$container" "$port" || true
+    configure_aiostreams_download_client "$name" "$url" "$api_key" "$container" || true
 
     # Add root folder
     local existing_rf
@@ -2262,6 +2842,25 @@ wait_for_service() {
     return 1
 }
 
+configure_aiostreams() {
+    [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]] || return 0
+    log_step "Checking AIOStreams..."
+    local elapsed=0 max_wait=120
+    while [[ $elapsed -lt $max_wait ]]; do
+        if curl -sf --connect-timeout 3 --max-time 10 "http://localhost:${AIOSTREAMS_PORT:-3000}" -o /dev/null 2>/dev/null; then
+            log_info "  AIOStreams is reachable on port ${AIOSTREAMS_PORT:-3000}."
+            if [[ -n "${AIOSTREAMS_NEWZNAB_URL:-}" ]]; then
+                log_info "  Newznab details saved for dashboard setup: ${AIOSTREAMS_NEWZNAB_URL}"
+            fi
+            return 0
+        fi
+        sleep 3
+        elapsed=$((elapsed + 3))
+    done
+    log_warn "  AIOStreams did not become reachable within ${max_wait}s. Its dashboard remains available at ${AIOSTREAMS_BASE_URL:-http://localhost:3000}."
+    return 1
+}
+
 configure_arrs() {
     log_section "Auto-Configuring Services via API"
 
@@ -2272,6 +2871,8 @@ configure_arrs() {
     else
         log_warn "jq not found. Advanced config (naming, media management, quality profiles) will be skipped."
     fi
+
+    configure_aiostreams || true
 
     local radarr_url="http://localhost:${SVC_PORTS[radarr]}"
     local sonarr_url="http://localhost:${SVC_PORTS[sonarr]}"
@@ -2813,6 +3414,11 @@ print_post_install() {
     echo -e "   • ${GREEN}Rclone Folder set to /mnt/remote/torbox/__all__ ✓${NC}"
     echo -e "   • ${GREEN}WebDAV enabled ✓${NC}"
     echo -e "   • ${GREEN}Rclone mount enabled, path /mnt/remote ✓${NC}"
+    if [[ "${DECYPHARR_USENET_ENABLED:-false}" == "true" ]]; then
+        echo -e "   • ${GREEN}Native Usenet providers configured ✓${NC}"
+        echo -e "   • ${GREEN}Radarr/Sonarr SABnzbd client added (priority ${DECYPHARR_USENET_PRIORITY:-0}) ✓${NC}"
+        echo "   • Media disk path: ${DECYPHARR_USENET_DISK_PATH:-memory-only}"
+    fi
     echo "   • After logging in, verify the above in Debrid & Rclone tabs"
     echo ""
     echo -e "${CYAN}2. Prowlarr${NC}"
@@ -2931,6 +3537,24 @@ print_post_install() {
         echo "   • Install the approved Requests plugin for Android TV discovery"
     fi
 
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        echo ""
+        echo -e "${CYAN}AIOStreams / Usenet${NC}"
+        echo "   • Open ${AIOSTREAMS_BASE_URL:-http://localhost:${AIOSTREAMS_PORT:-3000}}"
+        echo "   • Login: ${AIOSTREAMS_AUTH_USER:-aiostreams} (password: ./manage.sh keys --show-secrets)"
+        if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+            echo "   • FUSE library: ${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}"
+            echo "   • Radarr/Sonarr SABnzbd client is auto-added when their APIs are ready"
+        else
+            echo "   • Direct streaming mode is enabled; configure the AIOStreams service in Stremio"
+        fi
+        if [[ -n "${AIOSTREAMS_NEWZNAB_URL:-}" ]]; then
+            echo "   • Newznab URL was saved in .env; add it under AIOStreams → Addons → Newznab"
+        else
+            echo "   • Add Newznab/AltHub under AIOStreams → Addons → Newznab"
+        fi
+    fi
+
     echo ""
     if [[ "$SERVICES_STARTED" == "true" ]]; then
         echo -e "${CYAN}6. Seerr${NC}"
@@ -2992,7 +3616,7 @@ print_post_install() {
     echo "  ./manage.sh stop     # Stop all services"
     echo "  ./manage.sh status   # Check status"
     echo "  ./manage.sh logs     # View logs"
-    echo "  ./manage.sh update   # Pull pinned & restart"
+    echo "  ./manage.sh update   # Pull latest stable images & restart"
     echo "  ./manage.sh urls     # Show service URLs"
     echo ""
 
@@ -3008,13 +3632,27 @@ print_post_install() {
     echo "    ↓"
     echo "  Decypharr mounts TorBox WebDAV via rclone → symlinks files"
     echo "    ↓"
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        echo "  AIOStreams → optional NNTP/Newshosting streaming and SABnzbd API"
+        if [[ "${AIOSTREAMS_FUSE_ENABLED:-false}" == "true" ]]; then
+            echo "    ↓"
+            echo "  Radarr/Sonarr import Usenet symlinks from ${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}"
+        fi
+        echo "    ↓"
+    fi
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
         echo "  Plex reads symlinked files → streams to your devices"
+    elif [[ "$MEDIA_SERVER" == "silo" ]]; then
+        echo "  Silo reads symlinked files → streams to your devices"
     else
         echo "  Jellyfin reads symlinked files → streams to your devices"
     fi
     echo ""
-    echo -e "  ${YELLOW}No media is stored locally — everything streams from TorBox!${NC}"
+    if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+        echo -e "  ${YELLOW}No media is stored locally — playback can stream from TorBox or the optional Usenet provider.${NC}"
+    else
+        echo -e "  ${YELLOW}No media is stored locally — everything streams from TorBox!${NC}"
+    fi
     echo ""
 }
 
@@ -3049,6 +3687,23 @@ EXISTING_SILO_OMNIBUS_IMAGE=""
 EXISTING_SILO_ADMIN_USER=""
 EXISTING_SILO_ADMIN_EMAIL=""
 EXISTING_SILO_ADMIN_PASS=""
+EXISTING_COMPOSE_FILE=""
+EXISTING_AIOSTREAMS_ENABLED=""
+EXISTING_AIOSTREAMS_PORT=""
+EXISTING_AIOSTREAMS_BASE_URL=""
+EXISTING_AIOSTREAMS_CACHE_BYTES=""
+EXISTING_AIOSTREAMS_SECRET_KEY=""
+EXISTING_AIOSTREAMS_AUTH_USER=""
+EXISTING_AIOSTREAMS_AUTH_PASS=""
+EXISTING_AIOSTREAMS_USENET_MODE=""
+EXISTING_AIOSTREAMS_USENET_PROVIDERS="[]"
+EXISTING_AIOSTREAMS_MOUNT_DIR=""
+EXISTING_AIOSTREAMS_NEWZNAB_URL=""
+EXISTING_AIOSTREAMS_NEWZNAB_API_KEY=""
+EXISTING_DECYPHARR_USENET_ENABLED=""
+EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
+EXISTING_DECYPHARR_USENET_DISK_PATH=""
+EXISTING_DECYPHARR_USENET_PRIORITY=""
 
 check_existing_installation() {
     if [[ -f "${SETUP_COMPLETE_FILE}" ]]; then
@@ -3086,6 +3741,25 @@ check_existing_installation() {
         EXISTING_BAZARR_API_KEY="$(env_val BAZARR_API_KEY)" || true
         EXISTING_TORBOX_API_KEY="$(env_val TORBOX_API_KEY)" || true
         EXISTING_COMPOSE_PROFILES="$(env_val COMPOSE_PROFILES)" || true
+        EXISTING_COMPOSE_FILE="$(env_val COMPOSE_FILE)" || true
+        EXISTING_AIOSTREAMS_ENABLED="$(env_val AIOSTREAMS_ENABLED)" || true
+        EXISTING_AIOSTREAMS_PORT="$(env_val AIOSTREAMS_PORT)" || true
+        EXISTING_AIOSTREAMS_BASE_URL="$(env_val AIOSTREAMS_BASE_URL)" || true
+        EXISTING_AIOSTREAMS_CACHE_BYTES="$(env_val AIOSTREAMS_CACHE_BYTES)" || true
+        EXISTING_AIOSTREAMS_SECRET_KEY="$(env_val AIOSTREAMS_SECRET_KEY)" || true
+        EXISTING_AIOSTREAMS_AUTH_USER="$(env_val AIOSTREAMS_AUTH_USER)" || true
+        EXISTING_AIOSTREAMS_AUTH_PASS="$(env_val AIOSTREAMS_AUTH_PASS)" || true
+        EXISTING_AIOSTREAMS_USENET_MODE="$(env_val AIOSTREAMS_USENET_MODE)" || true
+        EXISTING_AIOSTREAMS_USENET_PROVIDERS="$(grep '^AIOSTREAMS_USENET_PROVIDERS=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//' | sed 's/\\"/"/g;s/\\\\/\\/g;s/\\\$/\$/g;s/\\`/`/g')" || true
+        [[ -n "$EXISTING_AIOSTREAMS_USENET_PROVIDERS" ]] || EXISTING_AIOSTREAMS_USENET_PROVIDERS="[]"
+        EXISTING_AIOSTREAMS_MOUNT_DIR="$(env_val AIOSTREAMS_MOUNT_DIR)" || true
+        EXISTING_AIOSTREAMS_NEWZNAB_URL="$(env_val AIOSTREAMS_NEWZNAB_URL)" || true
+        EXISTING_AIOSTREAMS_NEWZNAB_API_KEY="$(env_val AIOSTREAMS_NEWZNAB_API_KEY)" || true
+        EXISTING_DECYPHARR_USENET_ENABLED="$(env_val DECYPHARR_USENET_ENABLED)" || true
+        EXISTING_DECYPHARR_USENET_PROVIDERS="$(grep '^DECYPHARR_USENET_PROVIDERS=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//' | sed 's/\\"/"/g;s/\\\\/\\/g')" || true
+        [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
+        EXISTING_DECYPHARR_USENET_DISK_PATH="$(env_val DECYPHARR_USENET_DISK_PATH)" || true
+        EXISTING_DECYPHARR_USENET_PRIORITY="$(env_val DECYPHARR_USENET_PRIORITY)" || true
         EXISTING_SILO_SECRET_KEY="$(env_val SILO_SECRET_KEY)" || true
         EXISTING_SILO_PUID="$(env_val SILO_PUID)" || true
         EXISTING_SILO_PGID="$(env_val SILO_PGID)" || true
@@ -3158,6 +3832,25 @@ check_existing_installation() {
             EXISTING_PROWLARR_ADMIN_USER=$(grep '^PROWLARR_ADMIN_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_PROWLARR_ADMIN_PASS=$(grep '^PROWLARR_ADMIN_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_COMPOSE_PROFILES=$(grep '^COMPOSE_PROFILES=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_COMPOSE_FILE=$(grep '^COMPOSE_FILE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_ENABLED=$(grep '^AIOSTREAMS_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_PORT=$(grep '^AIOSTREAMS_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_BASE_URL=$(grep '^AIOSTREAMS_BASE_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_CACHE_BYTES=$(grep '^AIOSTREAMS_CACHE_BYTES=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_SECRET_KEY=$(grep '^AIOSTREAMS_SECRET_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_AUTH_USER=$(grep '^AIOSTREAMS_AUTH_USER=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_AUTH_PASS=$(grep '^AIOSTREAMS_AUTH_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_USENET_MODE=$(grep '^AIOSTREAMS_USENET_MODE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_USENET_PROVIDERS=$(grep '^AIOSTREAMS_USENET_PROVIDERS=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//' | sed 's/\\"/"/g;s/\\\\/\\/g;s/\\\$/\$/g;s/\\`/`/g' | tr -d '\r') || true
+            [[ -n "$EXISTING_AIOSTREAMS_USENET_PROVIDERS" ]] || EXISTING_AIOSTREAMS_USENET_PROVIDERS="[]"
+            EXISTING_AIOSTREAMS_MOUNT_DIR=$(grep '^AIOSTREAMS_MOUNT_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_NEWZNAB_URL=$(grep '^AIOSTREAMS_NEWZNAB_URL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_AIOSTREAMS_NEWZNAB_API_KEY=$(grep '^AIOSTREAMS_NEWZNAB_API_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_DECYPHARR_USENET_ENABLED=$(grep '^DECYPHARR_USENET_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_DECYPHARR_USENET_PROVIDERS=$(grep '^DECYPHARR_USENET_PROVIDERS=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d= -f2- | sed 's/^"//;s/"$//' | sed 's/\\"/"/g;s/\\\\/\\/g') || true
+            [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
+            EXISTING_DECYPHARR_USENET_DISK_PATH=$(grep '^DECYPHARR_USENET_DISK_PATH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_DECYPHARR_USENET_PRIORITY=$(grep '^DECYPHARR_USENET_PRIORITY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_SECRET_KEY=$(grep '^SILO_SECRET_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PUID=$(grep '^SILO_PUID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PGID=$(grep '^SILO_PGID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
@@ -3260,6 +3953,16 @@ main() {
                 echo "  TORBOX_MOUNT_DIR      Mount directory (default: /mnt/torbox-media)"
                 echo "  TORBOX_HW_ACCEL       'intel', 'nvidia', 'amd', or 'none' (auto-detects if unset)"
                 echo "  TORBOX_INSTALL_DIR   Custom install directory (default: ./torbox-media-server)"
+                echo "  TORBOX_ENABLE_AIOSTREAMS  'true' enables optional AIOStreams/Usenet support"
+                echo "  TORBOX_AIOSTREAMS_USENET_MODE  'both', 'direct', or 'arr' (default: both when enabled)"
+                echo "  TORBOX_AIOSTREAMS_BASE_URL/PORT  LAN URL and host port (default: detected LAN IP:3000 / 3000)"
+                echo "  TORBOX_AIOSTREAMS_CACHE_BYTES  Disk cache bytes (default: 0; media stays off local disk)"
+                echo "  TORBOX_USENET_HOST/USER/PASS  Optional NNTP provider details (Newshosting default host)"
+                echo "  TORBOX_DECYPHARR_USENET_ENABLED  'true' adds Decypharr's native SABnzbd client"
+                echo "  TORBOX_DECYPHARR_USENET_PROVIDERS  Decypharr provider JSON (priority/backup supported)"
+                echo "  TORBOX_DECYPHARR_USENET_PRIORITY  Arr client priority (default: 0, preferred)"
+                echo "  TORBOX_DECYPHARR_USENET_DISK_PATH  Empty keeps native Usenet media off local disk"
+                echo "  TORBOX_NEWZNAB_URL/API_KEY  Optional indexer details saved for AIOStreams dashboard setup"
                 echo "  SYNC_AUTH_ONLY       Set to 'true' to only re-sync admin credentials to running *arrs"
                 echo "  TORBOX_START_SERVICES 'true' or 'false' (default: true)"
                 exit 0
@@ -3316,6 +4019,9 @@ main() {
         echo "     mkdir -p ${INSTALL_DIR}"
         echo "     mkdir -p ${CONFIG_DIR}/{prowlarr,radarr,sonarr,bazarr,seerr,decypharr}"
         echo "     mkdir -p ${DATA_DIR}/{media/{movies,tv},downloads/{radarr,sonarr}}"
+        if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
+            echo "     mkdir -p ${CONFIG_DIR}/aiostreams"
+        fi
         if [[ "$MEDIA_SERVER" == "plex" ]]; then
             echo "     mkdir -p ${CONFIG_DIR}/plex"
         elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
@@ -3342,6 +4048,7 @@ main() {
         echo ""
         echo "  5. Start Docker containers:"
         echo "     decypharr, prowlarr, byparr, radarr, sonarr, bazarr, seerr, ${MEDIA_SERVER}"
+        [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]] && echo "     aiostreams (optional Usenet service)"
         echo ""
         echo "  6. Auto-configure via API (download clients, root folders, naming, etc.)"
         echo ""

@@ -309,19 +309,36 @@ test_hex_key_validation_with_letters() {
 }
 
 # ============================================================================
-#  Function: docker-compose image references (pinned versions)
+#  Function: docker-compose image references (latest stable defaults)
 # ============================================================================
 
-test_image_versions_not_latest() {
+test_image_versions_latest_defaults() {
     local compose_file="${SCRIPT_DIR}/../docker-compose.yml"
     if [[ ! -f "$compose_file" ]]; then
         echo -e "${CYAN}[SKIP]${NC} Cannot find docker-compose.yml to check image versions"
         return
     fi
-    if grep -v 'byparr' "$compose_file" | grep -qE 'image:.*:latest' 2>/dev/null; then
-        fail "Found Docker images using :latest tag"
+    local expected=(prowlarr byparr radarr sonarr bazarr seerr plex jellyfin)
+    local image
+    for image in "${expected[@]}"; do
+        if ! grep -q "${image}:latest" "$compose_file"; then
+            fail "Missing latest stable default for ${image}"
+            return
+        fi
+    done
+    pass "Published Docker images use latest stable defaults"
+}
+
+test_decypharr_usenet_bootstrap() {
+    local setup_file="${SCRIPT_DIR}/../setup.sh"
+    if grep -q 'gather_decypharr_usenet_config' "$setup_file" &&
+        grep -q 'DECYPHARR_USENET_PROVIDERS' "$setup_file" &&
+        grep -q 'implementation:"Sabnzbd"' "$setup_file" &&
+        grep -q 'urlBase",value:"/sabnzbd"' "$setup_file" &&
+        grep -q 'disk_path' "$setup_file"; then
+        pass "Decypharr native Usenet providers and SABnzbd client are bootstrapped"
     else
-        pass "No Docker images use :latest tag"
+        fail "Decypharr native Usenet bootstrap is incomplete"
     fi
 }
 
@@ -482,7 +499,8 @@ test_hex_key_validation_with_letters
 
 echo ""
 echo "--- Docker compose template tests ---"
-test_image_versions_not_latest
+test_image_versions_latest_defaults
+test_decypharr_usenet_bootstrap
 test_decypharr_dir_mount
 
 echo ""

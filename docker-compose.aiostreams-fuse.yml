@@ -1,0 +1,32 @@
+# Optional AIOStreams FUSE library overlay. setup.sh includes this only when
+# the Usenet workflow includes Radarr/Sonarr automation.
+services:
+  aiostreams:
+    environment:
+      SHARES_FUSE_ENABLED: "true"
+      SHARES_FUSE_MOUNT_PATH: ${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}
+      SHARES_FUSE_ALLOW_OTHER: "true"
+    volumes:
+      - "${AIOSTREAMS_HOST_PARENT:-/mnt}:/mnt:rshared"
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+    security_opt:
+      - apparmor:unconfined
+
+  radarr:
+    volumes:
+      - "${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:rslave"
+
+  sonarr:
+    volumes:
+      - "${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:rslave"
+
+  plex:
+    volumes:
+      - "${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:rslave"
+
+  jellyfin:
+    volumes:
+      - "${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:${AIOSTREAMS_MOUNT_DIR:-/mnt/aiostreams}:rslave"

@@ -35,7 +35,7 @@ for server in ("plex", "jellyfin"):
         assert not silo.get("user"), "Omnibus must start its own supervisor as root"
         assert str(silo["environment"]["PUID"]) == "911", "Cannot reuse host UID 0"
         assert silo["environment"]["SECRET_KEY"] == env["SILO_SECRET_KEY"]
-        assert "@sha256:" in silo["image"]
+        assert silo["image"].endswith(":latest") or "@sha256:" in silo["image"]
         assert silo["stop_grace_period"] == "2m0s"
         mounts = {v["target"]: v for v in silo["volumes"]}
         assert mounts["/data"]["read_only"] and mounts["/mnt/remote"]["read_only"]

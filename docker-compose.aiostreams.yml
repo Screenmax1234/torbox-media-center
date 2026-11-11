@@ -1,0 +1,42 @@
+# Optional AIOStreams service. setup.sh adds this file to COMPOSE_FILE only
+# when TORBOX_ENABLE_AIOSTREAMS=true.
+services:
+  aiostreams:
+    image: ${AIOSTREAMS_IMAGE:-ghcr.io/viren070/aiostreams:latest}
+    profiles: [aiostreams]
+    container_name: aiostreams
+    restart: unless-stopped
+    networks: [media-network]
+    ports:
+      - "${AIOSTREAMS_PORT:-3000}:3000"
+    environment:
+      BASE_URL: ${AIOSTREAMS_BASE_URL:-http://localhost:3000}
+      SECRET_KEY: ${AIOSTREAMS_SECRET_KEY:?AIOSTREAMS_SECRET_KEY is required}
+      DATABASE_URI: sqlite://./data/db.sqlite
+      PORT: "3000"
+      AIOSTREAMS_AUTH: ${AIOSTREAMS_AUTH:?AIOSTREAMS_AUTH is required}
+      AIOSTREAMS_AUTH_PERMISSIONS: ${AIOSTREAMS_AUTH_PERMISSIONS:-}
+      # AIOStreams reads these names directly. The AIOSTREAMS_* variables in
+      # the installed .env are intentionally namespaced for this stack and are
+      # mapped here so they cannot collide with other Compose services.
+      USENET_PROVIDERS: ${AIOSTREAMS_USENET_PROVIDERS:-[]}
+      # 0 keeps media bytes off local disk; increase this in bytes if a
+      # bounded segment cache is useful for repeat playback and seeking.
+      USENET_SEGMENT_DISK_CACHE_BYTES: ${AIOSTREAMS_CACHE_BYTES:-0}
+      USENET_SABNZBD_API_ENABLED: ${AIOSTREAMS_SABNZBD_API_ENABLED:-true}
+      ARR_MOUNT_DIR: ${AIOSTREAMS_MOUNT_DIR:-}
+      ARR_IMPORT_MODE: ${AIOSTREAMS_IMPORT_MODE:-symlink}
+      ARR_INSTANCES: ${AIOSTREAMS_ARR_INSTANCES:-[]}
+      ARR_AUTO_REPAIR: ${AIOSTREAMS_ARR_AUTO_REPAIR:-true}
+      USENET_RECHECK_SCOPE: ${AIOSTREAMS_RECHECK_SCOPE:-off}
+    volumes:
+      - "${CONFIG_DIR}/aiostreams:/app/data"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 2g

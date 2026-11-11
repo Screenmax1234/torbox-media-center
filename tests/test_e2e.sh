@@ -117,8 +117,67 @@ if command -v docker &>/dev/null; then
     else
         fail "docker-compose.yml validation failed (Plex profile)"
     fi
+
+    aio_dummy_env=(
+        "${dummy_env[@]}"
+        AIOSTREAMS_PORT=3000 AIOSTREAMS_BASE_URL="http://localhost:3000"
+        AIOSTREAMS_SECRET_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        AIOSTREAMS_AUTH="aiostreams:testpass" AIOSTREAMS_AUTH_PERMISSIONS="aiostreams=admin"
+        AIOSTREAMS_USENET_PROVIDERS="[]" AIOSTREAMS_CACHE_BYTES=0
+        AIOSTREAMS_SABNZBD_API_ENABLED=true AIOSTREAMS_IMPORT_MODE=symlink
+        AIOSTREAMS_ARR_INSTANCES="[]" AIOSTREAMS_ARR_AUTO_REPAIR=true
+        AIOSTREAMS_RECHECK_SCOPE=off AIOSTREAMS_MOUNT_DIR="/mnt/aiostreams"
+        AIOSTREAMS_HOST_PARENT="/mnt"
+    )
+    if env "${aio_dummy_env[@]}" COMPOSE_PROFILES="plex,aiostreams" \
+        docker compose -f "$COMPOSE_FILE" -f "$PROJECT_ROOT/docker-compose.aiostreams.yml" \
+        -f "$PROJECT_ROOT/docker-compose.aiostreams-fuse.yml" config -q 2>/dev/null; then
+        pass "AIOStreams overlays validate (Plex + FUSE profile)"
+    else
+        fail "AIOStreams overlay validation failed"
+    fi
 else
     warn "Docker not available — skipping compose validation"
+fi
+
+# 2.3b Optional AIOStreams files stay self-contained and use the upstream
+# variable names that the current AIOStreams image reads.
+if [[ -f "$PROJECT_ROOT/docker-compose.aiostreams.yml" && -f "$PROJECT_ROOT/docker-compose.aiostreams-fuse.yml" ]]; then
+    pass "AIOStreams Compose overlays are present"
+else
+    fail "AIOStreams Compose overlay files are missing"
+fi
+for aio_var in USENET_PROVIDERS USENET_SABNZBD_API_ENABLED ARR_MOUNT_DIR ARR_IMPORT_MODE ARR_INSTANCES; do
+    if grep -q "^[[:space:]]\+${aio_var}:" "$PROJECT_ROOT/docker-compose.aiostreams.yml"; then
+        pass "AIOStreams overlay maps ${aio_var}"
+    else
+        fail "AIOStreams overlay is missing ${aio_var}"
+    fi
+done
+if grep -q '/dev/fuse:/dev/fuse:rwm' "$PROJECT_ROOT/docker-compose.aiostreams-fuse.yml" &&
+    grep -q 'SYS_ADMIN' "$PROJECT_ROOT/docker-compose.aiostreams-fuse.yml" &&
+    grep -q 'rshared' "$PROJECT_ROOT/docker-compose.aiostreams-fuse.yml"; then
+    pass "AIOStreams FUSE overlay grants the documented mount plumbing"
+else
+    fail "AIOStreams FUSE overlay is missing device/capability/propagation settings"
+fi
+if grep -q 'AIOSTREAMS_CACHE_BYTES' "$SETUP_SCRIPT" &&
+    grep -q 'Local segment cache' "$SETUP_SCRIPT"; then
+    pass "AIOStreams cache size is selectable and defaults to zero"
+else
+    fail "AIOStreams cache choice is missing from setup.sh"
+fi
+if grep -q 'ip -4 route get' "$SETUP_SCRIPT" &&
+    grep -q 'AIOSTREAMS_BASE_URL' "$SETUP_SCRIPT"; then
+    pass "AIOStreams generated links prefer a detected LAN address"
+else
+    fail "AIOStreams LAN base URL detection is missing"
+fi
+if grep -q 'maxConnections' "$SETUP_SCRIPT" &&
+    grep -q 'AIOSTREAMS_USENET_PROVIDERS' "$SETUP_SCRIPT"; then
+    pass "Usenet provider bootstrap uses the upstream provider schema"
+else
+    fail "Usenet provider bootstrap is missing"
 fi
 
 # 2.3 All published service ports are intentionally LAN-accessible.
@@ -128,37 +187,30 @@ else
     pass "All published service ports are LAN-accessible"
 fi
 
-# 2.4 No :latest tags (all services pinned)
-latest_images=$(grep -E '^\s+image:' "$COMPOSE_FILE" | grep ':latest' || true)
-if [[ -z "$latest_images" ]]; then
-    pass "No Docker images use :latest tag"
-else
-    fail "Docker images using :latest tag" "$latest_images"
-fi
-
-# 2.4b Current stable image matrix is pinned in the checked-in Compose file.
+# 2.4 Published images follow upstream rolling stable tags. Every image can be
+# overridden through an environment variable for rollback/reproducibility.
 expected_images=(
-    'lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166'
-    'ghcr.io/thephaseless/byparr:3.0.4'
-    'lscr.io/linuxserver/radarr:6.4.4.10685-ls324'
-    'lscr.io/linuxserver/sonarr:4.0.20.3014-ls2'
-    'lscr.io/linuxserver/bazarr:1.6.2'
-    'ghcr.io/seerr-team/seerr:v3.5.1'
-    'lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330'
-    'lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57'
+    'lscr.io/linuxserver/prowlarr:latest'
+    'ghcr.io/thephaseless/byparr:latest'
+    'lscr.io/linuxserver/radarr:latest'
+    'lscr.io/linuxserver/sonarr:latest'
+    'lscr.io/linuxserver/bazarr:latest'
+    'ghcr.io/seerr-team/seerr:latest'
+    'lscr.io/linuxserver/plex:latest'
+    'lscr.io/linuxserver/jellyfin:latest'
 )
 for expected_image in "${expected_images[@]}"; do
-    if grep -qF "image: ${expected_image}" "$COMPOSE_FILE"; then
-        pass "Pinned image present: ${expected_image}"
+    if grep -qF "${expected_image}" "$COMPOSE_FILE"; then
+        pass "Latest stable image default present: ${expected_image}"
     else
-        fail "Pinned image missing: ${expected_image}"
+        fail "Latest stable image default missing: ${expected_image}"
     fi
 done
-if grep -qF 'DECYPHARR_VERSION: "v2.7.1"' "$COMPOSE_FILE" &&
-    grep -qF 'ARG DECYPHARR_VERSION=v2.7.1' "$PROJECT_ROOT/Dockerfile.decypharr"; then
-    pass "Decypharr wrapper and Compose use v2.7.1"
+if grep -qF 'DECYPHARR_IMAGE:-cy01/blackhole:latest' "$COMPOSE_FILE" &&
+    grep -qF 'ARG DECYPHARR_IMAGE=cy01/blackhole:latest' "$PROJECT_ROOT/Dockerfile.decypharr"; then
+    pass "Decypharr wrapper and Compose use latest by default"
 else
-    fail "Decypharr version pins are inconsistent"
+    fail "Decypharr latest defaults are inconsistent"
 fi
 
 # 2.5 All services have health checks

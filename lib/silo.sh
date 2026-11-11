@@ -100,6 +100,12 @@ silo_prepare() {
     fi
     cp "$source_dir/docker-compose.silo.yml" "$install/docker-compose.silo.yml"
     cp "$source_dir/docker-compose.silo-gpu.yml" "$install/docker-compose.silo-gpu.yml"
+    if [[ "$(env_val AIOSTREAMS_FUSE_ENABLED "$env_file" || true)" == true ]]; then
+        # AIOStreams' Usenet library is a separate read-only FUSE mount. Silo
+        # must see the same absolute path so its libraries can follow the
+        # symlinks imported by Radarr/Sonarr.
+        sed -i '/- "${CONFIG_DIR}\/silo:\/config"/a\      - "${AIOSTREAMS_MOUNT_DIR:-\/mnt\/aiostreams}:${AIOSTREAMS_MOUNT_DIR:-\/mnt\/aiostreams}:ro,rslave"' "$install/docker-compose.silo.yml"
+    fi
     # Strip only settings we own. Unrelated lines remain byte-for-byte unchanged.
     local tmp
     tmp=$(mktemp "$install/.silo-env.XXXXXXXX") || return 1

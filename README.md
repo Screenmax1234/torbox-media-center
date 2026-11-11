@@ -52,7 +52,9 @@ The Alpine wrapper requires `apk`, OpenRC, Docker, Docker Compose v2, and
 wrapper as root is recommended for an Alpine Docker LXC; when run as another
 user it uses `sudo` for the host setup and installer handoff. The wrapper does
 not replace the normal `setup.sh`; it only prepares Alpine-specific host
-dependencies and then delegates to it. On non-Alpine systems, use `setup.sh`.
+dependencies and then delegates to it. The same `TORBOX_ENABLE_AIOSTREAMS`,
+Usenet, cache, and `TORBOX_AIOSTREAMS_BASE_URL` options documented below work
+through this wrapper. On non-Alpine systems, use `setup.sh`.
 
 For unattended installs:
 
@@ -95,6 +97,87 @@ Read [the Silo guide](docs/SILO.md) for Android TV discovery and requests,
 transcoding verification, automatic import scanning, ports and backups. Silo is
 prerelease software; its database key must be saved separately and never
 regenerated.
+
+### Optional AIOStreams and Usenet
+
+AIOStreams is an optional service in the same Compose deployment. It is based
+on the upstream `ghcr.io/viren070/aiostreams:latest` image and is disabled by
+default, so existing TorBox-only installations do not gain extra containers or
+privileges.
+
+Enable it interactively by running `bash setup.sh` and answering **yes** when
+asked about AIOStreams. For an unattended install:
+
+```bash
+TORBOX_API_KEY="your-key" \
+TORBOX_ENABLE_AIOSTREAMS=true \
+TORBOX_AIOSTREAMS_USENET_MODE=both \
+TORBOX_USENET_HOST="news.newshosting.com" \
+TORBOX_USENET_PORT=563 \
+TORBOX_USENET_USER="your-newshosting-user" \
+TORBOX_USENET_PASS="your-newshosting-password" \
+TORBOX_NEWZNAB_URL="https://your-indexer.example/api" \
+TORBOX_NEWZNAB_API_KEY="your-indexer-key" \
+bash setup.sh --yes
+```
+
+The workflow choices are:
+
+| Mode | Behavior |
+|---|---|
+| `both` | Direct AIOStreams/Stremio streaming plus an AIOStreams SABnzbd-compatible client for Radarr/Sonarr. |
+| `direct` | Direct AIOStreams/Stremio streaming only. No FUSE mount is added. |
+| `arr` | Radarr/Sonarr use AIOStreams as a Usenet download client. Releases are imported as symlinks, so media bytes are streamed on demand. |
+
+In `both` or `arr` mode, the installer adds `/dev/fuse`, `SYS_ADMIN`, shared
+mount propagation, and the `/mnt/aiostreams` library mount to AIOStreams,
+Radarr, Sonarr, and the selected media server. The TorBox mount remains at
+`/mnt/torbox-media`; the two providers do not share a mount or overwrite each
+other.
+
+Hardware transcoding remains configured separately for the selected media
+server: `TORBOX_HW_ACCEL=intel|amd|nvidia` controls Plex/Jellyfin, and Silo's
+GPU mode passes `/dev/dri` when `TORBOX_SILO_GPU=dri`. AIOStreams itself serves
+the stream and does not replace that media-server transcoder.
+
+AIOStreams is available at `http://SERVER-IP:3000` by default. The installer
+uses the host's detected LAN address for generated addon links when it can;
+set `TORBOX_AIOSTREAMS_BASE_URL` explicitly if the address is dynamic or you
+are using a reverse proxy. Its generated login is stored in the installed
+private `.env` and can be viewed with:
+
+```bash
+cd torbox-media-server
+./manage.sh keys --show-secrets
+```
+
+For Android TV, install the [AIOStreams Android/TV app](https://docs.aiostreams.viren070.me/apps/android)
+or open its web app and sign in to the LAN URL. Open `/stremio/configure` on
+that same URL to create the Stremio addon configuration. AIOStreams can play
+its own Usenet streams directly, so this path does not require Plex, Jellyfin,
+or Silo.
+
+The installer defaults AIOStreams' segment disk cache to `0`, so media bytes
+are streamed without a local media cache. Interactive setup asks for a cache
+size in bytes; unattended installs can set
+`TORBOX_AIOSTREAMS_CACHE_BYTES` (for example `2147483648` for 2 GiB) if faster
+repeat playback or seeking is more important than keeping disk use near zero.
+
+The Newshosting provider can be entered during setup or later under
+**AIOStreams → Usenet → Providers**. Newznab/AltHub details are saved locally
+when supplied, but AIOStreams indexer addons are configured under
+**AIOStreams → Addons → Newznab** because those addon profiles live in its
+database. For external Stremio clients, set `TORBOX_AIOSTREAMS_BASE_URL` to a
+reachable LAN hostname or HTTPS URL. For a domain, put a reverse proxy such as
+Caddy or Nginx Proxy Manager in front of `http://aiostreams:3000`, enable HTTPS,
+and set the base URL to that HTTPS address. For a home server, a Cloudflare
+Tunnel can publish the same internal service without port forwarding: create a
+cloudflared tunnel, add a Published Application route to `http://aiostreams:3000`,
+then set the public HTTPS URL in the installed `.env` as `AIOSTREAMS_BASE_URL`
+and restart the stack (or rerun `setup.sh` with `TORBOX_AIOSTREAMS_BASE_URL`).
+`--refresh-management` only regenerates `manage.sh`; it does not change runtime
+URLs. Keep the tunnel token private, and keep the raw Compose admin ports behind
+your firewall.
 
 ### Repair an older installation
 
@@ -189,23 +272,33 @@ Run `.\setup.ps1 --help` for all available options.
 
 This repository is the public maintained fork at [github.com/Screenmax1234/torbox-media-center](https://github.com/Screenmax1234/torbox-media-center). It keeps the original TorBox → Decypharr → *arr → Plex/Jellyfin architecture, but the deployment and recovery paths have been repaired after testing the original project.
 
-### Current pinned images
+### Image update policy
 
-The versions below are the stable image pins in the current Compose file. They are deliberately versioned instead of using `latest`, so an update is reviewable and reproducible. The LinuxServer tags include the image build suffix; keeping that suffix prevents a registry-side rebuild from changing an otherwise identical application version.
+Published containers follow each upstream project's `latest` stable tag by
+default. Running `./manage.sh update` pulls those tags before recreating the
+stack, so security fixes do not wait for a source-checkout edit. This is less
+reproducible than a fixed digest and a major upstream release can still require
+configuration changes, so keep the automatic backup made before repairs and
+use the image override variables in `.env` when you need to hold or roll back
+one service.
 
-| Container | Image pin | Upgrade note |
+| Container | Default image | Override |
 |---|---|---|
-| Decypharr | `ghcr.io/sirrobot01/decypharr:v2.7.1` (local wrapper build) | v2.7 includes TorBox rate-limit/backoff fixes; the wrapper still handles runtime UIDs and FUSE. |
-| Prowlarr | `lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166` | Current stable LinuxServer release. |
-| Byparr | `ghcr.io/thephaseless/byparr:3.0.4` | FlareSolverr-compatible API remains at `http://byparr:8191`; keep it under Prowlarr Indexer Proxies, never the global HTTP proxy. |
-| Radarr | `lscr.io/linuxserver/radarr:6.4.4.10685-ls324` | Current 6.4 release; back up the database before upgrading an older 5.x install. |
-| Sonarr | `lscr.io/linuxserver/sonarr:4.0.20.3014-ls2` | Current stable 4.0 release. |
-| Bazarr | `lscr.io/linuxserver/bazarr:1.6.2` | Subtitle automation companion for Radarr and Sonarr. |
-| Seerr | `ghcr.io/seerr-team/seerr:v3.5.1` | Includes the current 3.5 security fixes. |
-| Plex | `lscr.io/linuxserver/plex:1.43.5.11079-b3b13e506-ls330` | Current stable 1.43.5 LinuxServer build. |
-| Jellyfin | `lscr.io/linuxserver/jellyfin:12.4ubu2604-ls57` | Major upgrade from 10.11; Jellyfin recommends a full backup and a post-upgrade library scan. |
+| Decypharr | `cy01/blackhole:latest` (local wrapper build) | `DECYPHARR_IMAGE` |
+| Prowlarr | `lscr.io/linuxserver/prowlarr:latest` | `PROWLARR_IMAGE` |
+| Byparr | `ghcr.io/thephaseless/byparr:latest` | `BYPARR_IMAGE` |
+| Radarr | `lscr.io/linuxserver/radarr:latest` | `RADARR_IMAGE` |
+| Sonarr | `lscr.io/linuxserver/sonarr:latest` | `SONARR_IMAGE` |
+| Bazarr | `lscr.io/linuxserver/bazarr:latest` | `BAZARR_IMAGE` |
+| Seerr | `ghcr.io/seerr-team/seerr:latest` | `SEERR_IMAGE` |
+| Plex | `lscr.io/linuxserver/plex:latest` | `PLEX_IMAGE` |
+| Jellyfin | `lscr.io/linuxserver/jellyfin:latest` | `JELLYFIN_IMAGE` |
+| AIOStreams | `ghcr.io/viren070/aiostreams:latest` | `AIOSTREAMS_IMAGE` |
+| Silo | `ghcr.io/silo-server/silo-server:latest` | `SILO_OMNIBUS_IMAGE` |
 
-The pins were checked against the upstream stable releases available on 2026-10-31. The repository tests validate shell syntax, generated configuration, Compose structure and the image matrix; they cannot run the full Docker stack on every target Linux host. Always keep the backup made by the repair command until the upgraded stack has been tested. The current tested stack has already moved from Radarr 5 to 6 and Jellyfin 10.11 to 12; those are the only major application-line changes in this release. The remaining image changes are patch/build updates.
+For a reproducible deployment, set an override to a release tag or digest in
+the installed private `.env`. Keep a backup before major application-line
+updates, especially Radarr, Sonarr, Jellyfin, Plex, and Silo.
 
 ### Changes that affect existing installations
 
@@ -213,7 +306,7 @@ The following table maps the original behavior to the maintained deployment so a
 
 | Area | Original behavior | Current behavior and effect |
 |---|---|---|
-| Decypharr image | Compose referenced a registry-style `torbox-decypharr` image, which caused `pull access denied`. | Compose builds `Dockerfile.decypharr` locally on every start/update, using the upstream `ghcr.io/sirrobot01/decypharr:v2.7.1` base. |
+| Decypharr image | Compose referenced a registry-style `torbox-decypharr` image, which caused `pull access denied`. | Compose builds `Dockerfile.decypharr` locally on every start/update, using the upstream rolling stable image by default. |
 | Decypharr runtime user | Root installs could try to create UID 0 again; non-root installs could lack a passwd entry for the runtime UID. | The wrapper skips an existing UID and creates a matching account only when needed, so both root and normal-user installs build successfully. |
 | Decypharr configuration mount | A file-level config bind mount could fail when the image adjusted ownership of its config, logs or cache. | The complete `configs/decypharr/` directory is mounted at `/app`, allowing the image startup path to initialize its files. |
 | Host access | Several services were published only on loopback. | Every service port is published on the host LAN by default. From another device use the Linux host IP; container-to-container URLs still use Docker names. |
@@ -222,6 +315,7 @@ The following table maps the original behavior to the maintained deployment so a
 | Seerr connections | Existing connections could be skipped or retained with stale API keys. | Setup and `diagnose-connections.sh --repair` authenticate, test and refresh the Radarr/Sonarr records before saving them. |
 | Subtitle automation | The original stack had no subtitle manager, so subtitles required manual downloads or media-server-specific tools. | Bazarr is included on port `6767`, shares the same `/data` and `/mnt/remote` paths, and is automatically connected to Sonarr and Radarr. Provider credentials and language profiles remain user-selected. |
 | Plex imports | Remote FUSE changes might not trigger a filesystem watcher, and old installs could have stale notifications. | `repair-plex.sh` repairs Radarr/Sonarr import notifications; Plex automatic title scanning is documented as the fallback for remote mounts. |
+| Native Usenet | The original stack only sent torrent results to TorBox. | Optional Decypharr Usenet support adds a SABnzbd client to Radarr/Sonarr, supports primary and backup NNTP providers, and keeps the media disk path empty by default. |
 | Management script | Older generated scripts accepted a required second argument for `keys`, causing `$2: unbound variable` when run as `./manage.sh keys`. | `keys` works by itself and masks secrets by default; use `keys --show-secrets` only when you need the values. The full command list below matches the generated script. |
 | Updating | `manage.sh update` could be mistaken for a repository update. | `manage.sh update` refreshes images using the Compose file already installed. `git pull` plus `bash setup-fixed.sh --repair ...` refreshes Compose, Dockerfile and `manage.sh` while preserving `.env`, configs and media data. |
 
@@ -242,14 +336,14 @@ After the repair, the installed commands are:
 ```bash
 cd /root/torbox-media-center/torbox-media-server
 ./manage.sh status
-./manage.sh update       # use the pins now installed in this Compose file
+./manage.sh update       # pull current latest stable tags and rebuild Decypharr
 ./manage.sh logs sonarr
 ./manage.sh logs radarr
 ./manage.sh keys
 ./manage.sh keys --show-secrets
 ```
 
-`./manage.sh update` pulls the published images, rebuilds Decypharr and restarts the stack. It does not fetch a newer Compose file from GitHub. Repeat the `git pull` plus `setup-fixed.sh --repair` sequence when this repository publishes new pins.
+`./manage.sh update` pulls the published images, rebuilds Decypharr and restarts the stack. It does not fetch a newer Compose file from GitHub. Repeat the `git pull` plus `setup-fixed.sh --repair` sequence when this repository publishes installer changes.
 
 For a non-destructive connection check after upgrading:
 
@@ -310,6 +404,60 @@ To refresh stale Seerr connections or migrate the legacy Decypharr rate limit, u
   Plex, Jellyfin, or Silo reads these symlinks and streams the content
   to any device on your network - phone, TV, tablet, computer
 ```
+
+When AIOStreams is enabled, it runs alongside this TorBox path. Its built-in
+NNTP engine can stream from Newshosting (or another provider) directly to
+Stremio. In `arr`/`both` mode, Radarr and Sonarr send NZBs to AIOStreams through
+`/api/v1/sabnzbd`; AIOStreams exposes a FUSE library and the *arrs import
+symlinks into `/data/media`, so the video itself is never copied to local
+storage.
+
+### Optional native Decypharr Usenet path
+
+Decypharr can also connect directly to one or more Usenet providers. Enable it
+during setup when prompted, or set `TORBOX_DECYPHARR_USENET_ENABLED=true`.
+The installer then:
+
+1. Writes Decypharr's `usenet.providers` configuration.
+2. Adds **Decypharr Usenet** as a SABnzbd download client in Radarr and Sonarr.
+3. Gives that client priority `0` by default, so Arrs prefer NZB results over
+   the TorBox torrent client (the priority can be changed with
+   `TORBOX_DECYPHARR_USENET_PRIORITY`).
+4. Leaves `usenet.disk_path` empty, which keeps the media stream in
+   Decypharr's bounded memory window and preserves the zero local media-storage
+   design.
+
+The TorBox qBittorrent client remains available at the same time. Arrs choose
+between them from the result protocol: NZB/Newznab results go to Decypharr's
+SABnzbd client, while torrent/Torznab results go to the TorBox client. Provider
+`priority` and `backup: true` only control fallback order among NNTP
+providers. They do not make TorBox a backup for Usenet or vice versa.
+
+For non-interactive setup, provide a private JSON provider list:
+
+```bash
+TORBOX_DECYPHARR_USENET_ENABLED=true \
+TORBOX_DECYPHARR_USENET_PROVIDERS='[{"host":"news.provider.com","port":563,"username":"user","password":"pass","backbone":"Omicron","ssl":true,"max_connections":20,"priority":1,"backup":false}]' \
+bash setup.sh --yes
+```
+
+You can add a second provider with `"priority":2,"backup":true`. The
+provider JSON is written into the installed mode-600 `.env`; never commit it
+or paste it into a public issue.
+
+To add this to an existing installation, run the installer again with the
+same install directory and preserve the existing settings when prompted:
+
+```bash
+TORBOX_INSTALL_DIR=/root/torbox-media-center/torbox-media-server \
+TORBOX_DECYPHARR_USENET_ENABLED=true \
+TORBOX_DECYPHARR_USENET_PROVIDERS='[{"host":"news.provider.com","port":563,"username":"user","password":"pass","ssl":true,"max_connections":20,"priority":1,"backup":false}]' \
+bash setup.sh
+```
+
+The rerun merges the Usenet block into Decypharr's existing configuration,
+refreshes the SABnzbd client credentials, and preserves the TorBox mount,
+arr databases, media-server database, and other settings.
 
 ### Example: Requesting Your First Movie
 
@@ -374,6 +522,7 @@ User Request                Search & Automation           Cloud Download
 | **Sonarr** | 8989 | TV show manager. Same as Radarr but for TV series - handles seasons, episodes, and ongoing shows automatically. |
 | **Bazarr** | 6767 | Subtitle manager. Connects to Sonarr/Radarr and writes subtitle sidecars beside movies and episodes. Configure providers and language profiles in its web UI. |
 | **Seerr** | 5055 | Beautiful web UI where you (and your family/friends) can browse and request movies and TV shows. Supports Plex, Jellyfin & Emby. |
+| **AIOStreams** | 3000 | Optional Usenet and Stremio streaming service. In `arr`/`both` mode it also exposes a SABnzbd-compatible client and a FUSE library mount. |
 | **Plex** | 32400 | Media server option 1. Streams your library to any device. Requires a free Plex account. |
 | **Jellyfin** | 8096 | Media server option 2 (open-source, no account needed). Streams your library to any device. |
 | **Silo** | 8090 | Optional media server option 3 with native Android TV playback, discovery and request-plugin support. |
@@ -434,6 +583,7 @@ The script will interactively ask you for:
 | **User/Group IDs** | Press Enter to accept auto-detected PUID/PGID, or enter custom values |
 | **Timezone** | Press Enter to accept auto-detected timezone, or enter a custom one |
 | **Hardware acceleration** | Auto-detected; prompted only if multiple GPUs are present or none detected |
+| **AIOStreams / Usenet** | Optional; choose `both`, `direct`, or `arr`, then enter provider and optional Newznab details |
 | **Start services?** | Press Enter or `Y` to start immediately (recommended) |
 
 > **Auto-detected values:** Mount directory (`/mnt/torbox-media`), user/group IDs, timezone, and hardware acceleration are auto-detected. Override via environment variables: `TORBOX_MOUNT_DIR`, `TORBOX_HW_ACCEL`, `TORBOX_INDEXER_URL`.
@@ -455,6 +605,7 @@ Then the script automatically:
    - Plex libraries (Movies + TV Shows) if claim token was provided
    - Default public indexer (1337x) in Prowlarr
    - Bazarr connected to Sonarr and Radarr; subtitle providers and language profiles remain user-selected
+   - AIOStreams provider credentials, persistent secret, and optional FUSE/SABnzbd integration when enabled
 
 > **First run takes 5–15 minutes** (mostly downloading Docker images). Subsequent starts take seconds.
 >
@@ -486,6 +637,7 @@ The setup script pre-seeds and auto-configures as much as possible so you don't 
 | **Prowlarr** | Connected to Radarr + Sonarr, default indexer (1337x) added, Byparr configured as FlareSolverr proxy |
 | **Bazarr** | Connected to Sonarr and Radarr using the shared `/data` paths; provider credentials and language profiles are configured by you |
 | **Seerr** | Connected to Radarr, Sonarr, and your media server (Plex or Jellyfin) |
+| **AIOStreams** | Optional Usenet provider, authentication, SABnzbd API settings, and *arr mount integration when selected |
 | **Plex** | Libraries for Movies and TV Shows created (if claim token was provided) |
 | **Radarr/Sonarr/Prowlarr** | Admin authentication (Forms auth with auto-generated credentials) configured via API |
 
@@ -600,8 +752,8 @@ cd torbox-media-server/
 ./manage.sh logs      # View all logs (follow mode)
 ./manage.sh logs radarr  # View specific service logs
 ./manage.sh logs bazarr  # View subtitle service logs
-./manage.sh pull      # Pull pinned image versions without restarting
-./manage.sh update    # Pull pinned images and restart
+./manage.sh pull      # Pull latest stable images without restarting
+./manage.sh update    # Pull latest stable images and restart
 ./manage.sh down      # Stop and remove containers
 ./manage.sh urls      # Show all service URLs
 ./manage.sh keys      # Show API keys (use with care)
@@ -643,6 +795,8 @@ bash repair-plex.sh                 # Test and repair Radarr/Sonarr Plex notific
 ```
 torbox-media-server/
 ├── docker-compose.yml               # Version-controlled Docker Compose
+├── docker-compose.aiostreams.yml    # Optional AIOStreams service overlay
+├── docker-compose.aiostreams-fuse.yml # Optional Usenet FUSE/mount overlay
 ├── docker-compose.override.yml      # Auto-generated HW acceleration (if needed)
 ├── .env                             # API keys, user IDs, timezone, mount paths
 ├── .setup_complete                  # Marker file (created on successful setup)
@@ -708,7 +862,7 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 - **Only Decypharr** gets `SYS_ADMIN` capability and FUSE access - other containers only read files via symlinks
 - **Bazarr** shares `/data` and `/mnt/remote` with the *arrs so subtitle sidecars are written beside the imported media
 - **Decypharr config directory is mounted to `/app`** - the entire config directory is bind-mounted (not just config.json) because Decypharr needs to `chown` config.json, logs, and cache on startup; a file-level bind mount causes `chown` "Operation not permitted" errors
-- **Seerr is pinned to v3.5.1** - this includes the current security fixes in the published 3.5 release line. Keep the source checkout current before upgrading the installed stack.
+- **Published images follow latest stable tags** - `manage.sh update` pulls upstream security fixes. Set an image override in `.env` when you need to hold a release or roll back after a major upgrade.
 
 > ⚠️ **Never expose Radarr, Sonarr, Prowlarr, or Decypharr admin UIs to the public internet** without authentication and a reverse proxy with HTTPS. Seerr is designed for this purpose and has its own authentication system.
 
@@ -716,18 +870,18 @@ For remote access outside your home network, use a reverse proxy like [Caddy](ht
 
 ## Updating
 
-To update all services to their pinned versions:
+To pull the latest stable image tags and restart all services:
 
 ```bash
 cd torbox-media-server/
 ./manage.sh update
 ```
 
-This pulls the pinned Docker image versions already present in the installed Compose file and restarts all containers. Your configuration and data are preserved.
+This pulls the current upstream stable tags and restarts all containers. Your configuration and data are preserved.
 
-> **Important:** `manage.sh` is generated inside the install directory. If the repository has newer commands or image pins, `manage.sh update` cannot see them until you refresh the installed deployment files.
+> **Important:** `manage.sh` is generated inside the install directory. If the repository has newer commands or Compose defaults, `manage.sh update` cannot see them until you refresh the installed deployment files.
 
-> **Note:** Docker images are pinned to specific versions in `docker-compose.yml` for reproducibility. `./manage.sh update` updates the versions already copied into the install directory. To receive newer pins from this repository, update the source checkout and run the repair path below; do not rely on `manage.sh update` alone.
+> **Rollback:** Set the relevant image variable in the installed `.env` to a release tag or digest, then run `./manage.sh update`. The local Decypharr wrapper uses `DECYPHARR_IMAGE` as its base image.
 
 ---
 
@@ -781,6 +935,22 @@ The following environment variables can be set before running `bash setup.sh --y
 | `TORBOX_MOUNT_DIR` | `/mnt/torbox-media` | Custom mount directory for rclone FUSE mount |
 | `TORBOX_HW_ACCEL` | *(auto-detected)* | Hardware acceleration: `none`, `intel`, `amd`, or `nvidia` |
 | `TORBOX_INDEXER_URL` | `https://1337x.to` | Custom Prowlarr default indexer URL |
+| `TORBOX_ENABLE_AIOSTREAMS` | `false` | Enable the optional AIOStreams container and Usenet integration |
+| `TORBOX_AIOSTREAMS_USENET_MODE` | `both` when enabled | `both`, `direct`, or `arr` |
+| `TORBOX_AIOSTREAMS_PORT` | `3000` | Host port for the AIOStreams dashboard/API |
+| `TORBOX_AIOSTREAMS_BASE_URL` | Detected LAN IP and port 3000 (localhost fallback) | URL placed in generated AIOStreams links; set a stable LAN hostname or HTTPS URL when needed |
+| `TORBOX_AIOSTREAMS_CACHE_BYTES` | `0` | AIOStreams segment cache size in bytes; `0` keeps media bytes off local disk |
+| `TORBOX_USENET_HOST` | `news.newshosting.com` | NNTP provider hostname |
+| `TORBOX_USENET_PORT` | `563` | NNTP provider port; port 119 selects non-TLS mode |
+| `TORBOX_USENET_TLS` | `true` | NNTP TLS toggle |
+| `TORBOX_USENET_USER/PASS` | *(empty)* | Provider credentials; kept only in the installed `.env` |
+| `TORBOX_USENET_CONNECTIONS` | `20` | Maximum provider connections |
+| `TORBOX_NEWZNAB_URL/API_KEY` | *(empty)* | Optional Newznab/AltHub details saved for AIOStreams dashboard setup |
+| `TORBOX_AIOSTREAMS_MOUNT_DIR` | `/mnt/aiostreams` | FUSE path used by *arr/media containers in `arr`/`both` mode |
+| `TORBOX_DECYPHARR_USENET_ENABLED` | `false` | Add Decypharr's native SABnzbd client to Radarr/Sonarr |
+| `TORBOX_DECYPHARR_USENET_PROVIDERS` | *(empty)* | JSON array of Decypharr NNTP providers; supports `priority` and `backup` |
+| `TORBOX_DECYPHARR_USENET_PRIORITY` | `0` | Arr download-client priority; lower values are preferred |
+| `TORBOX_DECYPHARR_USENET_DISK_PATH` | *(empty)* | Decypharr Usenet media path; empty keeps media off local disk |
 | `TORBOX_INSTALL_DIR` | `<repo>/torbox-media-server` | Custom install directory (used by CasaOS installer) |
 | `TORBOX_CASAOS` | `false` | Set `true` when installing on CasaOS |
 | `SYNC_AUTH_ONLY` | `false` | Set `true` to only re-sync admin credentials to running *arrs (no full setup) |
@@ -907,6 +1077,50 @@ that Bazarr can write a sidecar beside it. The service log is available with
 
 All published ports are LAN-accessible by default. If a service is unreachable, check the host firewall and the port binding in `docker-compose.yml`. See [Accessing From Other Devices](#accessing-from-other-devices) above.
 
+### AIOStreams or Usenet is not working
+
+Check whether the optional service was enabled and whether its Compose profile
+is present:
+
+```bash
+cd torbox-media-server
+./manage.sh status
+./manage.sh logs aiostreams
+./manage.sh urls
+```
+
+The dashboard is normally `http://SERVER-IP:3000`. Login credentials are shown
+with `./manage.sh keys --show-secrets`. In **AIOStreams → Usenet → Providers**,
+verify the NNTP hostname, TLS port, username, password, and connection limit.
+For Newshosting, the usual secure endpoint is `news.newshosting.com` on port
+`563`.
+
+For `arr` or `both` mode, all relevant containers must see the same
+`/mnt/aiostreams` path. Check that `/dev/fuse` exists on the Linux host and that
+the installed Compose files include `docker-compose.aiostreams-fuse.yml`.
+Radarr and Sonarr should contain an **AIOStreams Usenet** SABnzbd client using
+host `aiostreams`, port `3000`, URL Base `/api/v1/sabnzbd`, and the
+`username:password` value from `AIOSTREAMS_AUTH` as the API key.
+
+Newznab/AltHub is configured in **AIOStreams → Addons → Newznab**. The installer
+stores the URL and API key locally for reference, but the addon profile itself
+is stored in AIOStreams' database and cannot be safely injected through the
+bootstrap environment.
+
+For native Decypharr Usenet, check:
+
+```bash
+docker compose exec decypharr jq '.usenet' /app/config.json
+./manage.sh logs decypharr
+```
+
+Radarr and Sonarr should contain a **Decypharr Usenet** SABnzbd client using
+host `decypharr`, port `8282`, URL Base `/sabnzbd`, and the Arr host/API
+key credentials generated by setup. If you want TorBox torrents preferred,
+set `DECYPHARR_USENET_PRIORITY=2` in the installed `.env` and run
+`./manage.sh update`; this changes the Arr client priority only. Usenet
+provider priority and `backup` flags control NNTP failover inside Decypharr.
+
 ### "Seerr can't connect to Radarr/Sonarr"
 
 Make sure you're using **container names** (`radarr`, `sonarr`) as the hostname in Seerr, NOT `localhost`. All services communicate using Docker's internal network where each container is reachable by its service name.
@@ -1024,7 +1238,7 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 
 - **Seerr** instead of Overseerr - Overseerr was archived in 2024; Seerr is the merged successor supporting Plex, Jellyfin, and Emby
 - **Byparr** instead of FlareSolverr - FlareSolverr is currently non-functional (Cloudflare detects it); Byparr is a drop-in replacement using the same API
-- **Only Decypharr gets FUSE/SYS_ADMIN** - Plex/Jellyfin/Radarr/Sonarr only read files, they don't need elevated privileges
+- **FUSE/SYS_ADMIN are opt-in** - Decypharr always owns the TorBox mount; AIOStreams receives its own FUSE capability only in `arr`/`both` Usenet mode, while Plex/Jellyfin/Radarr/Sonarr receive read-only propagated mounts
 - **Plex on bridge networking** - Plex runs on the same Docker bridge network as all other services, allowing Seerr to connect via container name (`http://plex:32400`). Host networking was avoided because many Linux firewalls (UFW, firewalld) block traffic from Docker bridge containers to the host, causing Seerr ↔ Plex connectivity failures
 - **Plex notifications on Radarr/Sonarr** - requests a Plex library scan when content is imported, upgraded, renamed or deleted, avoiding reliance on file watching through the remote mount. Scanning and metadata matching can still take time
 - **LAN-accessible port bindings** - make the stack behave like a normal Docker deployment; use firewall rules and reverse proxy authentication before allowing internet access
@@ -1035,9 +1249,11 @@ This usually means Radarr or Sonarr hasn't finished starting yet. Wait a minute 
 - **Pre-seeded API keys** - generated during setup and injected into config.xml before containers start, enabling fully automated API-based configuration
 - **jq for JSON manipulation** - used to modify *arr config via API; auto-installed as a dependency
 - **Quality profile upgrades enabled** - without this, Radarr/Sonarr won't replace a 720p version with a 1080p one; most users want automatic upgrades
-- **Docker images pinned to specific versions** - image tags are pinned in `docker-compose.yml` to avoid breakage from upstream changes; on Linux run `git pull` followed by `bash setup-fixed.sh --repair /path/to/torbox-media-server`, and on Windows run `git pull` followed by `.\repair-install.ps1 -InstallDir C:\torbox-media-server`
+- **Latest stable image tags with rollback overrides** - the normal path follows upstream security releases; set image variables in `.env` to release tags or digests when a reproducible rollback is needed
 - **Decypharr config directory mounted to `/app`** - the entire `configs/decypharr/` directory is bind-mounted to `/app` (not just `config.json`) because Decypharr attempts to `chown` the `/app` directory contents on startup; a file-level bind mount causes "Operation not permitted" errors and crash-loops
 - **Decypharr credentials pre-seeded** - generated during setup and injected into config.json, eliminating manual credential creation
+- **AIOStreams is an optional Compose overlay** - direct-streaming users receive only the AIOStreams service; `arr`/`both` users additionally receive `/dev/fuse`, `SYS_ADMIN`, shared mount propagation and the same Usenet mount path in every consumer container
+- **Usenet remains zero-media-storage** - AIOStreams exposes verified releases as symlinks and streams their bytes on demand. Its SQLite database, NZB metadata and bounded caches still use local disk, but the media files are not copied into the library
 
 ---
 
@@ -1060,6 +1276,9 @@ New to this? Here's what the key terms mean:
 | **Claim Token** | A one-time code from Plex that links a new Plex server to your Plex account. Expires after 4 minutes. |
 | **API Key** | A secret password that services use to talk to each other. The setup script generates these automatically. |
 | ***arr suite** | Collective name for the automation apps built around the Servarr project: Radarr, Sonarr, Prowlarr, etc. |
+| **Usenet provider** | A service such as Newshosting that supplies NNTP access to Usenet articles. |
+| **Newznab indexer** | A searchable Usenet catalog that returns NZB results, such as an AltHub-compatible endpoint. |
+| **AIOStreams** | Optional self-hosted streaming service with built-in NNTP playback and a SABnzbd-compatible API. |
 
 ---
 
