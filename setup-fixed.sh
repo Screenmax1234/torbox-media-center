@@ -15,7 +15,9 @@ case "${1:-}" in
         ;;
     --repair)
         shift
-        exec "${SCRIPT_DIR}/repair-install.sh" "${1:-}"
+        # Invoke through Bash so repairs also work when a checkout was created
+        # on a filesystem that stripped executable permission bits.
+        exec bash "${SCRIPT_DIR}/repair-install.sh" "${1:-}"
         ;;
     --help|-h)
         echo "Usage: ./setup-fixed.sh [setup.sh options]"
@@ -27,6 +29,6 @@ case "${1:-}" in
         echo "--repair updates an existing install and rebuilds Decypharr."
         ;;
     *)
-        exec "${SCRIPT_DIR}/setup.sh" "$@"
+        exec bash "${SCRIPT_DIR}/setup.sh" "$@"
         ;;
 esac
