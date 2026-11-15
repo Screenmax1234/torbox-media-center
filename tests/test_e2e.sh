@@ -11,6 +11,7 @@ PROJECT_ROOT="${SCRIPT_DIR}/.."
 SETUP_SCRIPT="${PROJECT_ROOT}/setup.sh"
 UNINSTALL_SCRIPT="${PROJECT_ROOT}/uninstall.sh"
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
+NZBHYDRA_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.nzbhydra.yml"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 GITIGNORE="${PROJECT_ROOT}/.gitignore"
 
@@ -84,6 +85,18 @@ else
     fail "docker-compose.yml not found"
 fi
 
+if [[ -f "$NZBHYDRA_COMPOSE_FILE" ]] && grep -q 'lscr.io/linuxserver/nzbhydra2:latest' "$NZBHYDRA_COMPOSE_FILE" && grep -q 'NZBHYDRA_PORT:-5076}:5076' "$NZBHYDRA_COMPOSE_FILE"; then
+    pass "NZBHydra2 overlay exists with the documented latest image and port"
+else
+    fail "NZBHydra2 Compose overlay is missing or incomplete"
+fi
+
+if [[ -f "${PROJECT_ROOT}/add-nzbhydra.sh" ]] && grep -q -- '--no-deps nzbhydra' "${PROJECT_ROOT}/add-nzbhydra.sh" && grep -q -- 'docker-compose.nzbhydra.yml' "${PROJECT_ROOT}/lib/nzbhydra.sh"; then
+    pass "Existing-install NZBHydra2 add-on preserves the active stack"
+else
+    fail "Existing-install NZBHydra2 add-on is missing its isolated startup path"
+fi
+
 # 2.2 Validate compose with dummy env (Jellyfin profile)
 dummy_env=(
     TORBOX_API_KEY="test1234567890abcdef1234567890ab"
@@ -135,6 +148,12 @@ if command -v docker &>/dev/null; then
         pass "AIOStreams overlays validate (Plex + FUSE profile)"
     else
         fail "AIOStreams overlay validation failed"
+    fi
+    if env "${dummy_env[@]}" NZBHYDRA_PORT=5076 NZBHYDRA_IMAGE="lscr.io/linuxserver/nzbhydra2:latest" COMPOSE_PROFILES="plex,nzbhydra" \
+        docker compose -f "$COMPOSE_FILE" -f "$PROJECT_ROOT/docker-compose.nzbhydra.yml" config -q 2>/dev/null; then
+        pass "NZBHydra2 overlay validates (Plex + NZBHydRA profile)"
+    else
+        fail "NZBHydra2 overlay validation failed"
     fi
 else
     warn "Docker not available — skipping compose validation"

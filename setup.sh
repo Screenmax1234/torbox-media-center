@@ -49,6 +49,13 @@ DECYPHARR_USENET_PROVIDERS="[]"
 DECYPHARR_USENET_DISK_PATH=""
 DECYPHARR_USENET_PRIORITY=0
 
+# Optional NZBHydra2 indexer aggregator. It is kept in its own Compose overlay
+# so existing TorBox/Silo installs do not receive another container unless the
+# operator explicitly enables it.
+NZBHYDRA_ENABLED=false
+NZBHYDRA_PORT=5076
+NZBHYDRA_IMAGE="lscr.io/linuxserver/nzbhydra2:latest"
+
 trap 'cleanup_on_interrupt' INT TERM
 
 cleanup_on_interrupt() {
@@ -114,6 +121,7 @@ source "${SCRIPT_DIR}/lib/seerr.sh"
 source "${SCRIPT_DIR}/lib/plex.sh"
 source "${SCRIPT_DIR}/lib/silo.sh"
 source "${SCRIPT_DIR}/lib/bazarr.sh"
+source "${SCRIPT_DIR}/lib/nzbhydra.sh"
 
 # Published images follow upstream latest stable tags by default. Operators can
 # set image variables in the installed .env to release tags or digests.
@@ -423,6 +431,10 @@ check_port_conflicts() {
     if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
         ports_to_check+=("${AIOSTREAMS_PORT:-3000}")
         port_names+=("AIOStreams")
+    fi
+    if [[ "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
+        ports_to_check+=("${NZBHYDRA_PORT:-5076}")
+        port_names+=("NZBHydra2")
     fi
     local conflicts=false
     local network_stats=""
@@ -852,6 +864,42 @@ gather_decypharr_usenet_config() {
     log_info "Decypharr native Usenet ${DECYPHARR_USENET_ENABLED} (Arr priority ${DECYPHARR_USENET_PRIORITY}, media disk path: ${DECYPHARR_USENET_DISK_PATH:-memory})."
 }
 
+# Configure the optional NZBHydra2 indexer aggregator. NZBHydra's own indexer
+# credentials are intentionally configured in its web UI; the installer only
+# provisions the service, persistent config directory and LAN port.
+gather_nzbhydra_config() {
+    local enabled="${TORBOX_ENABLE_NZBHYDRA:-${EXISTING_NZBHYDRA_ENABLED:-}}"
+    if [[ -z "$enabled" && "${EXISTING_COMPOSE_PROFILES:-}" == *nzbhydra* ]]; then
+        enabled=true
+    fi
+    if [[ -z "$enabled" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            enabled=false
+        else
+            echo -e "${BOLD}NZBHydra2 indexer aggregator${NC} (optional)"
+            echo "  Adds a private NZBHydra2 web service for your Usenet indexers."
+            read -rp "  Enable NZBHydra2? [y/N]: " _nzb_enable
+            [[ "${_nzb_enable,,}" == "y" || "${_nzb_enable,,}" == "yes" ]] && enabled=true || enabled=false
+        fi
+    fi
+    case "${enabled,,}" in
+        1|true|yes|y) NZBHYDRA_ENABLED=true ;;
+        *) NZBHYDRA_ENABLED=false; return 0 ;;
+    esac
+
+    NZBHYDRA_PORT="${TORBOX_NZBHYDRA_PORT:-${EXISTING_NZBHYDRA_PORT:-5076}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_NZBHYDRA_PORT:-}" ]]; then
+        read -rp "  NZBHydra2 host port [${NZBHYDRA_PORT}]: " _nzb_port
+        NZBHYDRA_PORT="${_nzb_port:-$NZBHYDRA_PORT}"
+    fi
+    if [[ ! "$NZBHYDRA_PORT" =~ ^[0-9]+$ ]] || ((NZBHYDRA_PORT < 1 || NZBHYDRA_PORT > 65535)); then
+        log_warn "Invalid NZBHydra2 port; using 5076."
+        NZBHYDRA_PORT=5076
+    fi
+    NZBHYDRA_IMAGE="${TORBOX_NZBHYDRA_IMAGE:-${EXISTING_NZBHYDRA_IMAGE:-lscr.io/linuxserver/nzbhydra2:latest}}"
+    log_info "NZBHydra2 enabled on host port ${NZBHYDRA_PORT}. Configure indexers after startup at http://SERVER-IP:${NZBHYDRA_PORT}."
+}
+
 gather_config() {
     log_section "Configuration"
 
@@ -1000,6 +1048,7 @@ gather_config() {
     echo ""
     gather_aiostreams_config
     gather_decypharr_usenet_config
+    gather_nzbhydra_config
 
     echo ""
 
@@ -1445,6 +1494,9 @@ create_directories() {
     if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
         mkdir -p "${CONFIG_DIR}/aiostreams"
     fi
+    if [[ "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
+        mkdir -p "${CONFIG_DIR}/nzbhydra"
+    fi
     mkdir -p "${DATA_DIR}"/{media/{movies,tv},downloads/{radarr,sonarr}}
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
@@ -1681,6 +1733,9 @@ generate_env_file() {
     if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" && "${compose_profile}" != *aiostreams* ]]; then
         compose_profile+=",aiostreams"
     fi
+    if [[ "${NZBHYDRA_ENABLED:-false}" == "true" && "${compose_profile}" != *nzbhydra* ]]; then
+        compose_profile+=",nzbhydra"
+    fi
 
     cat >"${ENV_FILE}" <<ENV_EOF
 # TorBox Media Server - Environment Configuration
@@ -1720,6 +1775,9 @@ DECYPHARR_USENET_ENABLED="${DECYPHARR_USENET_ENABLED:-false}"
 DECYPHARR_USENET_PROVIDERS=$(dotenv_quote "${DECYPHARR_USENET_PROVIDERS:-[]}")
 DECYPHARR_USENET_DISK_PATH=$(dotenv_quote "${DECYPHARR_USENET_DISK_PATH:-}")
 DECYPHARR_USENET_PRIORITY="${DECYPHARR_USENET_PRIORITY:-0}"
+NZBHYDRA_ENABLED="${NZBHYDRA_ENABLED:-false}"
+NZBHYDRA_PORT="${NZBHYDRA_PORT:-5076}"
+NZBHYDRA_IMAGE="${NZBHYDRA_IMAGE:-lscr.io/linuxserver/nzbhydra2:latest}"
 ENV_EOF
 
     if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
@@ -1959,6 +2017,26 @@ HW_OVERRIDE
         chmod 700 "${INSTALL_DIR}/backup-silo.sh"
     fi
 
+    if [[ "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
+        nzbhydra_prepare "${INSTALL_DIR}" "${SCRIPT_DIR}"
+    else
+        rm -f "${INSTALL_DIR}/docker-compose.nzbhydra.yml"
+        local _nzb_files="$(env_val COMPOSE_FILE "${ENV_FILE}" || true)"
+        if [[ -n "$_nzb_files" ]]; then
+            _nzb_files=":${_nzb_files}:"
+            _nzb_files="${_nzb_files//:docker-compose.nzbhydra.yml:/:}"
+            _nzb_files="${_nzb_files//:${INSTALL_DIR}\/docker-compose.nzbhydra.yml:/:}"
+            _nzb_files="${_nzb_files#:}"
+            _nzb_files="${_nzb_files%:}"
+            local _nzb_env_tmp
+            _nzb_env_tmp=$(mktemp "${ENV_FILE}.nzb.XXXXXX")
+            chmod 600 "${_nzb_env_tmp}"
+            sed -E '/^COMPOSE_FILE=/d' "${ENV_FILE}" >"${_nzb_env_tmp}"
+            [[ -n "$_nzb_files" ]] && printf 'COMPOSE_FILE=%s\n' "$(dotenv_quote "$_nzb_files")" >>"${_nzb_env_tmp}"
+            mv "${_nzb_env_tmp}" "${ENV_FILE}"
+        fi
+    fi
+
     chmod 600 "${COMPOSE_FILE}"
     log_info "Docker Compose file set up."
 
@@ -2091,6 +2169,7 @@ pull_remote_images() {
         case ",${profile}," in *,"$server",*) services+=("$server") ;; esac
     done
     case ",${profile}," in *,aiostreams,*) services+=(aiostreams) ;; esac
+    case ",${profile}," in *,nzbhydra,*) services+=(nzbhydra) ;; esac
     compose_cmd pull "${services[@]}"
 }
 
@@ -2148,6 +2227,9 @@ show_urls() {
         local aio_port
         aio_port="$(env_val AIOSTREAMS_PORT || true)"
         printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "AIOStreams" "$NC" "${aio_port:-3000}"
+    fi
+    if [[ "$(env_val NZBHYDRA_ENABLED || true)" == "true" || "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "NZBHydra" "$NC" "$(env_val NZBHYDRA_PORT || echo "${NZBHYDRA_PORT:-5076}")"
     fi
     echo "  From another device, replace localhost with this server's LAN IP."
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -2463,12 +2545,20 @@ case "${1:-help}" in
                 echo -e "  ${RED}✗${NC} AIOStreams (port ${_aio_port}) — not reachable"
             fi
         fi
+        if [[ "$(env_val NZBHYDRA_ENABLED || true)" == "true" ]]; then
+            _nzb_port="$(env_val NZBHYDRA_PORT || echo 5076)"
+            if curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "http://localhost:${_nzb_port}" 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} NZBHydra2 (port ${_nzb_port}) — reachable"
+            else
+                echo -e "  ${RED}✗${NC} NZBHydra2 (port ${_nzb_port}) — not reachable"
+            fi
+        fi
         echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
         ;;
     shell)
         if [[ -z "${2:-}" ]]; then
             echo -e "${YELLOW}Usage: ./manage.sh shell <service-name>${NC}"
-            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr aiostreams plex jellyfin silo"
+            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr nzbhydra aiostreams plex jellyfin silo"
             exit 1
         fi
         compose_cmd exec "$2" /bin/bash 2>/dev/null || compose_cmd exec "$2" /bin/sh
@@ -3421,7 +3511,14 @@ print_post_install() {
     fi
     echo "   • After logging in, verify the above in Debrid & Rclone tabs"
     echo ""
-    echo -e "${CYAN}2. Prowlarr${NC}"
+    if [[ "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
+        echo -e "${CYAN}Optional: NZBHydra2${NC}"
+        echo "   • Open http://localhost:${NZBHYDRA_PORT:-5076}"
+        echo "   • Complete first-run setup and add your Usenet indexers"
+        echo "   • Add it to Prowlarr as a Newznab indexer using NZBHydra's API URL/key"
+        echo ""
+    fi
+    echo -e "${CYAN}3. Prowlarr${NC}"
     echo "   • Open http://localhost:9696"
     if [[ "$SERVICES_STARTED" == "true" && -n "${PROWLARR_ADMIN_PASS:-}" ]]; then
         echo -e "   • ${GREEN}Credentials pre-seeded ✓${NC}"
@@ -3704,6 +3801,9 @@ EXISTING_DECYPHARR_USENET_ENABLED=""
 EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
 EXISTING_DECYPHARR_USENET_DISK_PATH=""
 EXISTING_DECYPHARR_USENET_PRIORITY=""
+EXISTING_NZBHYDRA_ENABLED=""
+EXISTING_NZBHYDRA_PORT=""
+EXISTING_NZBHYDRA_IMAGE=""
 
 check_existing_installation() {
     if [[ -f "${SETUP_COMPLETE_FILE}" ]]; then
@@ -3760,6 +3860,9 @@ check_existing_installation() {
         [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
         EXISTING_DECYPHARR_USENET_DISK_PATH="$(env_val DECYPHARR_USENET_DISK_PATH)" || true
         EXISTING_DECYPHARR_USENET_PRIORITY="$(env_val DECYPHARR_USENET_PRIORITY)" || true
+        EXISTING_NZBHYDRA_ENABLED="$(env_val NZBHYDRA_ENABLED)" || true
+        EXISTING_NZBHYDRA_PORT="$(env_val NZBHYDRA_PORT)" || true
+        EXISTING_NZBHYDRA_IMAGE="$(env_val NZBHYDRA_IMAGE)" || true
         EXISTING_SILO_SECRET_KEY="$(env_val SILO_SECRET_KEY)" || true
         EXISTING_SILO_PUID="$(env_val SILO_PUID)" || true
         EXISTING_SILO_PGID="$(env_val SILO_PGID)" || true
@@ -3851,6 +3954,9 @@ check_existing_installation() {
             [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
             EXISTING_DECYPHARR_USENET_DISK_PATH=$(grep '^DECYPHARR_USENET_DISK_PATH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_DECYPHARR_USENET_PRIORITY=$(grep '^DECYPHARR_USENET_PRIORITY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_NZBHYDRA_ENABLED=$(grep '^NZBHYDRA_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_NZBHYDRA_PORT=$(grep '^NZBHYDRA_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_NZBHYDRA_IMAGE=$(grep '^NZBHYDRA_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_SECRET_KEY=$(grep '^SILO_SECRET_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PUID=$(grep '^SILO_PUID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PGID=$(grep '^SILO_PGID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
@@ -3919,6 +4025,9 @@ main() {
             --add-silo)
                 exec bash "${SCRIPT_DIR}/add-silo.sh" "${INSTALL_DIR}"
                 ;;
+            --add-nzbhydra)
+                exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${INSTALL_DIR}"
+                ;;
             --refresh-management)
                 if [[ ! -f "${ENV_FILE}" ]]; then
                     log_error "No existing .env found at ${ENV_FILE}. Run setup first or set TORBOX_INSTALL_DIR."
@@ -3938,6 +4047,7 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --add-silo                   Add Silo to an existing running stack (/dev/dri by default)"
+                echo "  --add-nzbhydra               Add NZBHydra2 to an existing running stack (default port 5076)"
                 echo "  --refresh-management         Refresh manage.sh only (preserves configs and running containers)"
                 echo "  -y, --yes, --non-interactive  Use defaults for all prompts"
                 echo "  -d, --dry-run                 Preview changes without applying them"
@@ -3954,6 +4064,9 @@ main() {
                 echo "  TORBOX_HW_ACCEL       'intel', 'nvidia', 'amd', or 'none' (auto-detects if unset)"
                 echo "  TORBOX_INSTALL_DIR   Custom install directory (default: ./torbox-media-server)"
                 echo "  TORBOX_ENABLE_AIOSTREAMS  'true' enables optional AIOStreams/Usenet support"
+                echo "  TORBOX_ENABLE_NZBHYDRA   'true' enables optional NZBHydra2 indexer aggregator"
+                echo "  TORBOX_NZBHYDRA_PORT     NZBHydra2 host port (default: 5076)"
+                echo "  TORBOX_NZBHYDRA_IMAGE    NZBHydra2 image override (default: LinuxServer latest)"
                 echo "  TORBOX_AIOSTREAMS_USENET_MODE  'both', 'direct', or 'arr' (default: both when enabled)"
                 echo "  TORBOX_AIOSTREAMS_BASE_URL/PORT  LAN URL and host port (default: detected LAN IP:3000 / 3000)"
                 echo "  TORBOX_AIOSTREAMS_CACHE_BYTES  Disk cache bytes (default: 0; media stays off local disk)"

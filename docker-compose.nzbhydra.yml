@@ -1,0 +1,32 @@
+# Optional NZBHydra2 indexer aggregator. setup.sh adds this file to
+# COMPOSE_FILE only when NZBHydra is enabled.
+services:
+  nzbhydra:
+    image: ${NZBHYDRA_IMAGE:-lscr.io/linuxserver/nzbhydra2:latest}
+    profiles: [nzbhydra]
+    container_name: nzbhydra
+    restart: unless-stopped
+    networks: [media-network]
+    ports:
+      - "${NZBHYDRA_PORT:-5076}:5076"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - "${CONFIG_DIR}/nzbhydra:/config"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5076 || wget -qO- http://localhost:5076 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1g

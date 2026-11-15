@@ -13,6 +13,10 @@ case "${1:-}" in
         shift
         exec bash "${SCRIPT_DIR}/add-silo.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
         ;;
+    --add-nzbhydra)
+        shift
+        exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
+        ;;
     --repair)
         shift
         # Invoke through Bash so repairs also work when a checkout was created
@@ -23,6 +27,7 @@ case "${1:-}" in
         echo "Usage: ./setup-fixed.sh [setup.sh options]"
         echo "       ./setup-fixed.sh --repair [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-silo [INSTALL_DIR]"
+        echo "       bash setup-fixed.sh --add-nzbhydra [INSTALL_DIR]"
         echo "       ./setup-fixed.sh --refresh-management"
         echo ""
         echo "The normal path runs setup.sh with the local Decypharr build fix."
