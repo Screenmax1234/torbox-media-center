@@ -97,12 +97,6 @@ else
     fail "Existing-install NZBHydra2 add-on is missing its isolated startup path"
 fi
 
-if grep -q 'minimumFreeSpaceWhenImporting = 0' "${PROJECT_ROOT}/setup.sh" && [[ -f "${PROJECT_ROOT}/allow-zero-import-space.sh" ]] && grep -q 'config/mediamanagement' "${PROJECT_ROOT}/allow-zero-import-space.sh"; then
-    pass "Radarr/Sonarr import free-space floor is disabled without changing media paths"
-else
-    fail "Zero import free-space migration is missing"
-fi
-
 # 2.2 Validate compose with dummy env (Jellyfin profile)
 dummy_env=(
     TORBOX_API_KEY="test1234567890abcdef1234567890ab"

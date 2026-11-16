@@ -17,10 +17,6 @@ case "${1:-}" in
         shift
         exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
         ;;
-    --allow-zero-import-space)
-        shift
-        exec bash "${SCRIPT_DIR}/allow-zero-import-space.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
-        ;;
     --repair)
         shift
         # Invoke through Bash so repairs also work when a checkout was created
@@ -32,7 +28,6 @@ case "${1:-}" in
         echo "       ./setup-fixed.sh --repair [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-silo [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-nzbhydra [INSTALL_DIR]"
-        echo "       bash setup-fixed.sh --allow-zero-import-space [INSTALL_DIR]"
         echo "       ./setup-fixed.sh --refresh-management"
         echo ""
         echo "The normal path runs setup.sh with the local Decypharr build fix."

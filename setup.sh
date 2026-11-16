@@ -2191,7 +2191,6 @@ show_help() {
     echo "  urls        Show all service URLs"
     echo "  keys        Show API keys"
     echo "  reset-auth  Push admin passwords from .env into Radarr/Sonarr/Prowlarr"
-    echo "  allow-zero-import-space  Disable Radarr/Sonarr's import free-space floor"
     echo "  enable      Enable auto-start on boot"
     echo "  disable     Disable auto-start on boot"
     echo "  backup      Back up configs and .env (briefly stops Silo if enabled)"
@@ -2362,43 +2361,6 @@ reset_auth_cmd() {
     echo -e "Use ${BOLD}./manage.sh keys --show-secrets${NC} to view credentials."
 }
 
-allow_zero_import_space_cmd() {
-    if ! command -v jq &>/dev/null; then
-        echo -e "${RED}jq is required. Install jq and retry.${NC}" >&2
-        return 1
-    fi
-    local name port api_key config config_id updated
-    for name in Radarr Sonarr; do
-        port=7878
-        api_key="$(env_val RADARR_API_KEY)"
-        [[ "$name" == "Sonarr" ]] && port=8989 && api_key="$(env_val SONARR_API_KEY)"
-        if [[ -z "$api_key" ]]; then
-            echo -e "${YELLOW}Skipping ${name}: missing API key in .env${NC}"
-            continue
-        fi
-        config="$(curl -sf --connect-timeout 5 --max-time 15 -H "X-Api-Key: ${api_key}" \
-            "http://localhost:${port}/api/v3/config/mediamanagement" 2>/dev/null)" || true
-        if [[ -z "$config" ]]; then
-            echo -e "${YELLOW}Skipping ${name}: service not reachable on port ${port}${NC}"
-            continue
-        fi
-        config_id="$(echo "$config" | jq -r '.id // empty' 2>/dev/null)" || true
-        updated="$(echo "$config" | jq '.minimumFreeSpaceWhenImporting = 0' 2>/dev/null)" || true
-        if [[ -z "$config_id" || -z "$updated" ]]; then
-            echo -e "${YELLOW}Skipping ${name}: could not read media-management settings${NC}"
-            continue
-        fi
-        if echo "$updated" | curl -sf --connect-timeout 5 --max-time 15 -X PUT \
-            -H "Content-Type: application/json" -H "X-Api-Key: ${api_key}" \
-            "http://localhost:${port}/api/v3/config/mediamanagement/${config_id}" \
-            -d @- -o /dev/null 2>/dev/null; then
-            echo -e "${GREEN}✓${NC} ${name}: import free-space floor set to 0 MB"
-        else
-            echo -e "${YELLOW}Failed to update ${name} media-management settings${NC}"
-        fi
-    done
-}
-
 case "${1:-help}" in
     start)
         echo -e "${GREEN}Starting all services...${NC}"
@@ -2450,9 +2412,6 @@ case "${1:-help}" in
         ;;
     reset-auth)
         reset_auth_cmd
-        ;;
-    allow-zero-import-space)
-        allow_zero_import_space_cmd
         ;;
     enable)
         if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
@@ -2880,8 +2839,8 @@ DCJSON_EOF
     # Advanced configuration (requires jq for JSON manipulation)
     if [[ "${HAS_JQ:-false}" == "true" ]]; then
         update_arr_config "${name}" "$url" "$api_key" "config/mediamanagement" \
-            ".copyUsingHardlinks = false | .importExtraFiles = true | .extraFileExtensions = \"srt,sub,idx,ass,ssa,nfo\" | .${unmonitor_field} = false | .recycleBin = \"\" | .recycleBinCleanupDays = 0 | .minimumFreeSpaceWhenImporting = 0" &&
-            log_info "  Media management configured (hardlinks disabled; import free-space floor disabled)." ||
+            ".copyUsingHardlinks = false | .importExtraFiles = true | .extraFileExtensions = \"srt,sub,idx,ass,ssa,nfo\" | .${unmonitor_field} = false | .recycleBin = \"\" | .recycleBinCleanupDays = 0 | .minimumFreeSpaceWhenImporting = 100" &&
+            log_info "  Media management configured (hardlinks disabled for debrid; minimum import floor 100 MB)." ||
             log_warn "  Failed to configure media management."
 
         update_arr_config "${name}" "$url" "$api_key" "config/naming" "${naming_updates}" &&
