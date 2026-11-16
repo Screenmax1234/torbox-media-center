@@ -211,6 +211,36 @@ shown by NZBHydra2. Sync Prowlarr to Radarr and Sonarr. Keep NZBHydra2 and its
 indexer credentials behind your LAN firewall; do not publish it directly to
 the internet.
 
+### Usenet releases rejected for free disk space
+
+This stack keeps the media itself remote. The installer therefore configures
+Radarr and Sonarr with `minimumFreeSpaceWhenImporting=0`, which removes their
+extra free-space floor and lets Decypharr/AIOStreams import remote or symlinked
+Usenet results without reserving local media capacity. It does not create a
+local media cache or move your library to another disk.
+
+For an existing installation, apply the setting directly to the running Arr
+services:
+
+```bash
+cd /root/torbox-media-center
+git pull --ff-only
+bash setup-fixed.sh --allow-zero-import-space /root/torbox-media-center/torbox-media-server
+```
+
+Alternatively, after refreshing the generated management script, run:
+
+```bash
+cd /root/torbox-media-center/torbox-media-server
+./manage.sh allow-zero-import-space
+```
+
+If Radarr still rejects a release after this change, the filesystem behind the
+configured root folder is reporting less free space than the release itself.
+That is a separate hard capacity check; the 2 TB drive can then be used as the
+filesystem for the symlink/import directory while the actual video remains in
+TorBox/Usenet storage.
+
 ### Repair an older installation
 
 The repository also includes `setup-fixed.sh`, which uses the same installer
