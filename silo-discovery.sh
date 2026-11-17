@@ -133,19 +133,36 @@ radarr_post() {
 }
 
 authenticate_silo() {
-    local body response code
-    body=$(jq -cn --arg user "$SILO_DISCOVERY_USER" --arg pass "$SILO_DISCOVERY_PASS" '{Username:$user,Pw:$pass}')
-    response=$(curl -sS --connect-timeout 5 --max-time 30 \
-        -H 'Content-Type: application/json' \
-        -H 'X-Emby-Authorization: MediaBrowser Client="TorBox Discovery", Device="TorBox", DeviceId="torbox-silo-discovery", Version="1.0"' \
-        -X POST "${SILO_JF_URL%/}/Users/AuthenticateByName" -d "$body" \
-        -w $'\n%{http_code}') || true
-    code="${response##*$'\n'}"
-    response="${response%$'\n'*}"
-    [[ "$code" == 2* ]] || { warn "Silo Jellyfin-compatible login failed (HTTP ${code:-unknown})."; return 1; }
-    DISCOVERY_TOKEN=$(jq -r '.AccessToken // empty' <<<"$response")
-    DISCOVERY_USER_ID=$(jq -r '.User.Id // empty' <<<"$response")
-    [[ -n "$DISCOVERY_TOKEN" && -n "$DISCOVERY_USER_ID" ]] || { warn "Silo login response did not contain a user ID and access token."; return 1; }
+    local body response code auth_user candidate
+    local -a candidates=("$SILO_DISCOVERY_USER")
+    # Silo's compatibility layer commonly identifies a profile as
+    # username#profile.  If the operator entered only the account name, try
+    # the common same-name profile before reporting the 401.  An explicit
+    # username#profile value is always used as-is.
+    if [[ "$SILO_DISCOVERY_USER" != *#* ]]; then
+        candidates+=("${SILO_DISCOVERY_USER}#${SILO_DISCOVERY_USER}")
+    fi
+    for candidate in "${candidates[@]}"; do
+        auth_user="$candidate"
+        body=$(jq -cn --arg user "$auth_user" --arg pass "$SILO_DISCOVERY_PASS" '{Username:$user,Pw:$pass}')
+        response=$(curl -sS --connect-timeout 5 --max-time 30 \
+            -H 'Content-Type: application/json' \
+            -H 'X-Emby-Authorization: MediaBrowser Client="TorBox Discovery", Device="TorBox", DeviceId="torbox-silo-discovery", Version="1.0"' \
+            -X POST "${SILO_JF_URL%/}/Users/AuthenticateByName" -d "$body" \
+            -w $'\n%{http_code}') || true
+        code="${response##*$'\n'}"
+        response="${response%$'\n'*}"
+        if [[ "$code" == 2* ]]; then
+            DISCOVERY_TOKEN=$(jq -r '.AccessToken // empty' <<<"$response")
+            DISCOVERY_USER_ID=$(jq -r '.User.Id // empty' <<<"$response")
+            if [[ -n "$DISCOVERY_TOKEN" && -n "$DISCOVERY_USER_ID" ]]; then
+                [[ "$auth_user" == "$SILO_DISCOVERY_USER" ]] || log "Silo accepted the compatibility username#profile form (${auth_user%%#*}#...)."
+                return 0
+            fi
+        fi
+    done
+    warn "Silo Jellyfin-compatible login failed (HTTP 401). Use the Silo compatibility username as username#profile (for example admin#admin) and verify the password."
+    return 1
 }
 
 discover_candidates() {

@@ -229,7 +229,9 @@ bash setup-fixed.sh --add-silo-discovery /root/torbox-media-center/torbox-media-
 
 The add-on asks for a Silo/Jellyfin-compatible account. A normal viewer
 account is preferred; the Silo administrator also works if that account can
-see the movie library. The account must have watched movies in its history.
+see the movie library. If Silo rejects the plain account name, enter its
+compatibility identity as `username#profile` (for example `admin#admin`). The
+account must have watched movies in its history.
 The add-on writes the credentials only to the installed mode-600 `.env`,
 creates `configs/silo-discovery/state.json`, and enables a systemd timer. It
 does not restart Docker or regenerate the Silo database.

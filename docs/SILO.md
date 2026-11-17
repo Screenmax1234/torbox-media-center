@@ -195,7 +195,9 @@ bash setup-fixed.sh --add-silo-discovery /root/torbox-media-center/torbox-media-
 ```
 
 Enable Jellyfin compatibility in Silo first and use an account that can see
-the movie library. The add-on uses `POST /Users/AuthenticateByName`, recent
+the movie library. Silo may require the compatibility identity in
+`username#profile` form, such as `admin#admin`; the installer retries that
+common form after a plain-name 401. The add-on uses `POST /Users/AuthenticateByName`, recent
 played movies, and the compatible `/Items/{id}/Similar` endpoint. If a Silo
 build does not expose that optional endpoint, it tries
 `/Movies/Recommendations`; otherwise it logs a warning and adds nothing.
