@@ -186,6 +186,28 @@ initial setup wizard.
 
 ## Optional watch-history discovery
 
+For a maintained recommendation workflow, use SuggestArr. It handles
+Silo/Jellyfin, Plex, or Emby history, Trakt/Simkl accounts, recommendation
+jobs, request limits, and Seerr submission from a web UI. Add it with:
+
+```bash
+bash setup-fixed.sh --add-suggestarr /root/torbox-media-center/torbox-media-server
+```
+
+Open `http://SERVER-IP:5000` and configure Silo as the Jellyfin-compatible
+source (`http://silo:8096` inside Compose or `http://SERVER-IP:8097` from the
+LAN), then configure Seerr at `http://seerr:5055`. Create an hourly movie job
+with 8 results for an approximate 192-per-day ceiling. SuggestArr's own limits
+and pending-request pause are safer than directly injecting Radarr items.
+
+The legacy scheduler below remains available for troubleshooting or advanced
+users. Do not run both schedulers for the same library; disable its timer when
+SuggestArr is enabled:
+
+```bash
+systemctl disable --now torbox-silo-discovery.timer
+```
+
 The repository can periodically turn a Silo viewer's watched movies into
 Radarr searches. Enable it without restarting the stack:
 

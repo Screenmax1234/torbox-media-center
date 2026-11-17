@@ -17,6 +17,10 @@ case "${1:-}" in
         shift
         exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
         ;;
+    --add-suggestarr)
+        shift
+        exec bash "${SCRIPT_DIR}/add-suggestarr.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
+        ;;
     --add-silo-discovery)
         shift
         exec bash "${SCRIPT_DIR}/add-silo-discovery.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
@@ -32,6 +36,7 @@ case "${1:-}" in
         echo "       ./setup-fixed.sh --repair [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-silo [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-nzbhydra [INSTALL_DIR]"
+        echo "       bash setup-fixed.sh --add-suggestarr [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-silo-discovery [INSTALL_DIR]"
         echo "       ./setup-fixed.sh --refresh-management"
         echo ""

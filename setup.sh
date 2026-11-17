@@ -56,6 +56,14 @@ NZBHYDRA_ENABLED=false
 NZBHYDRA_PORT=5076
 NZBHYDRA_IMAGE="lscr.io/linuxserver/nzbhydra2:latest"
 
+# Optional SuggestArr recommendation automation. SuggestArr is configured from
+# its own web wizard after startup; no TMDb, media-server, or Seerr secret is
+# collected by this installer.
+SUGGESTARR_ENABLED=false
+SUGGESTARR_PORT=5000
+SUGGESTARR_IMAGE="ciuse99/suggestarr:latest"
+SUGGESTARR_LOG_LEVEL="INFO"
+
 trap 'cleanup_on_interrupt' INT TERM
 
 cleanup_on_interrupt() {
@@ -122,6 +130,7 @@ source "${SCRIPT_DIR}/lib/plex.sh"
 source "${SCRIPT_DIR}/lib/silo.sh"
 source "${SCRIPT_DIR}/lib/bazarr.sh"
 source "${SCRIPT_DIR}/lib/nzbhydra.sh"
+source "${SCRIPT_DIR}/lib/suggestarr.sh"
 
 # Published images follow upstream latest stable tags by default. Operators can
 # set image variables in the installed .env to release tags or digests.
@@ -214,11 +223,11 @@ dotenv_quote() {
 SVC_ORDER=(decypharr prowlarr byparr radarr sonarr bazarr seerr)
 declare -A SVC_PORTS=(
     [decypharr]=8282 [prowlarr]=9696 [byparr]=8191
-    [radarr]=7878 [sonarr]=8989 [bazarr]=6767 [seerr]=5055
+    [radarr]=7878 [sonarr]=8989 [bazarr]=6767 [seerr]=5055 [suggestarr]=5000
 )
 declare -A SVC_LABELS=(
     [decypharr]="Decypharr" [prowlarr]="Prowlarr" [byparr]="Byparr"
-    [radarr]="Radarr" [sonarr]="Sonarr" [bazarr]="Bazarr" [seerr]="Seerr"
+    [radarr]="Radarr" [sonarr]="Sonarr" [bazarr]="Bazarr" [seerr]="Seerr" [suggestarr]="SuggestArr"
 )
 
 print_service_urls() {
@@ -235,6 +244,9 @@ print_service_urls() {
         printf "  %b%-14s%b http://localhost:32400/web\n" "$BOLD" "Plex" "$NC"
     elif [[ "$MEDIA_SERVER" == "jellyfin" ]]; then
         printf "  %b%-14s%b http://localhost:8096\n" "$BOLD" "Jellyfin" "$NC"
+    fi
+    if [[ "${SUGGESTARR_ENABLED:-false}" == "true" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "SuggestArr" "$NC" "${SUGGESTARR_PORT:-5000}"
     fi
     if [[ "${SILO_ENABLED:-false}" == "true" || "$MEDIA_SERVER" == "silo" ]]; then
         printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "Silo" "$NC" "${SILO_HTTP_PORT:-8090}"
@@ -900,6 +912,41 @@ gather_nzbhydra_config() {
     log_info "NZBHydra2 enabled on host port ${NZBHYDRA_PORT}. Configure indexers after startup at http://SERVER-IP:${NZBHYDRA_PORT}."
 }
 
+# Configure optional SuggestArr recommendation automation. Credentials and
+# watched-user selection intentionally remain in SuggestArr's GUI wizard.
+gather_suggestarr_config() {
+    local enabled="${TORBOX_ENABLE_SUGGESTARR:-${EXISTING_SUGGESTARR_ENABLED:-}}"
+    if [[ -z "$enabled" && "${EXISTING_COMPOSE_PROFILES:-}" == *suggestarr* ]]; then
+        enabled=true
+    fi
+    if [[ -z "$enabled" ]]; then
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            enabled=false
+        else
+            echo -e "${BOLD}SuggestArr recommendation automation${NC} (optional)"
+            echo "  Reads Silo/Jellyfin, Plex, or Emby history and sends recommendations to Seerr."
+            read -rp "  Enable SuggestArr? [y/N]: " _suggest_enable
+            [[ "${_suggest_enable,,}" == "y" || "${_suggest_enable,,}" == "yes" ]] && enabled=true || enabled=false
+        fi
+    fi
+    case "${enabled,,}" in
+        1|true|yes|y) SUGGESTARR_ENABLED=true ;;
+        *) SUGGESTARR_ENABLED=false; return 0 ;;
+    esac
+    SUGGESTARR_PORT="${TORBOX_SUGGESTARR_PORT:-${EXISTING_SUGGESTARR_PORT:-5000}}"
+    if [[ "$NON_INTERACTIVE" != "true" && -z "${TORBOX_SUGGESTARR_PORT:-}" ]]; then
+        read -rp "  SuggestArr host port [${SUGGESTARR_PORT}]: " _suggest_port
+        SUGGESTARR_PORT="${_suggest_port:-$SUGGESTARR_PORT}"
+    fi
+    if [[ ! "$SUGGESTARR_PORT" =~ ^[0-9]+$ ]] || ((SUGGESTARR_PORT < 1 || SUGGESTARR_PORT > 65535)); then
+        log_warn "Invalid SuggestArr port; using 5000."
+        SUGGESTARR_PORT=5000
+    fi
+    SUGGESTARR_IMAGE="${TORBOX_SUGGESTARR_IMAGE:-${EXISTING_SUGGESTARR_IMAGE:-ciuse99/suggestarr:latest}}"
+    SUGGESTARR_LOG_LEVEL="${TORBOX_SUGGESTARR_LOG_LEVEL:-${EXISTING_SUGGESTARR_LOG_LEVEL:-INFO}}"
+    log_info "SuggestArr enabled on host port ${SUGGESTARR_PORT}. Configure it after startup at http://SERVER-IP:${SUGGESTARR_PORT}."
+}
+
 gather_config() {
     log_section "Configuration"
 
@@ -1049,6 +1096,7 @@ gather_config() {
     gather_aiostreams_config
     gather_decypharr_usenet_config
     gather_nzbhydra_config
+    gather_suggestarr_config
 
     echo ""
 
@@ -1497,6 +1545,9 @@ create_directories() {
     if [[ "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
         mkdir -p "${CONFIG_DIR}/nzbhydra"
     fi
+    if [[ "${SUGGESTARR_ENABLED:-false}" == "true" ]]; then
+        mkdir -p "${CONFIG_DIR}/suggestarr"
+    fi
     mkdir -p "${DATA_DIR}"/{media/{movies,tv},downloads/{radarr,sonarr}}
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
@@ -1736,6 +1787,9 @@ generate_env_file() {
     if [[ "${NZBHYDRA_ENABLED:-false}" == "true" && "${compose_profile}" != *nzbhydra* ]]; then
         compose_profile+=",nzbhydra"
     fi
+    if [[ "${SUGGESTARR_ENABLED:-false}" == "true" && "${compose_profile}" != *suggestarr* ]]; then
+        compose_profile+=",suggestarr"
+    fi
 
     cat >"${ENV_FILE}" <<ENV_EOF
 # TorBox Media Server - Environment Configuration
@@ -1778,6 +1832,10 @@ DECYPHARR_USENET_PRIORITY="${DECYPHARR_USENET_PRIORITY:-0}"
 NZBHYDRA_ENABLED="${NZBHYDRA_ENABLED:-false}"
 NZBHYDRA_PORT="${NZBHYDRA_PORT:-5076}"
 NZBHYDRA_IMAGE="${NZBHYDRA_IMAGE:-lscr.io/linuxserver/nzbhydra2:latest}"
+SUGGESTARR_ENABLED="${SUGGESTARR_ENABLED:-false}"
+SUGGESTARR_PORT="${SUGGESTARR_PORT:-5000}"
+SUGGESTARR_IMAGE="${SUGGESTARR_IMAGE:-ciuse99/suggestarr:latest}"
+SUGGESTARR_LOG_LEVEL="${SUGGESTARR_LOG_LEVEL:-INFO}"
 ENV_EOF
 
     if [[ "${SILO_ENABLED:-false}" == "true" ]]; then
@@ -2055,6 +2113,26 @@ HW_OVERRIDE
         fi
     fi
 
+    if [[ "${SUGGESTARR_ENABLED:-false}" == "true" ]]; then
+        suggestarr_prepare "${INSTALL_DIR}" "${SCRIPT_DIR}"
+    else
+        rm -f "${INSTALL_DIR}/docker-compose.suggestarr.yml"
+        local _suggest_files="$(env_val COMPOSE_FILE "${ENV_FILE}" || true)"
+        if [[ -n "$_suggest_files" ]]; then
+            _suggest_files=":${_suggest_files}:"
+            _suggest_files="${_suggest_files//:docker-compose.suggestarr.yml:/:}"
+            _suggest_files="${_suggest_files//:${INSTALL_DIR}\/docker-compose.suggestarr.yml:/:}"
+            _suggest_files="${_suggest_files#:}"
+            _suggest_files="${_suggest_files%:}"
+            local _suggest_env_tmp
+            _suggest_env_tmp=$(mktemp "${ENV_FILE}.suggest.XXXXXX")
+            chmod 600 "${_suggest_env_tmp}"
+            sed -E '/^COMPOSE_FILE=/d' "${ENV_FILE}" >"${_suggest_env_tmp}"
+            [[ -n "$_suggest_files" ]] && printf 'COMPOSE_FILE=%s\n' "$(dotenv_quote "$_suggest_files")" >>"${_suggest_env_tmp}"
+            mv "${_suggest_env_tmp}" "${ENV_FILE}"
+        fi
+    fi
+
     chmod 600 "${COMPOSE_FILE}"
     log_info "Docker Compose file set up."
 
@@ -2188,6 +2266,7 @@ pull_remote_images() {
     done
     case ",${profile}," in *,aiostreams,*) services+=(aiostreams) ;; esac
     case ",${profile}," in *,nzbhydra,*) services+=(nzbhydra) ;; esac
+    case ",${profile}," in *,suggestarr,*) services+=(suggestarr) ;; esac
     compose_cmd pull "${services[@]}"
 }
 
@@ -2251,6 +2330,9 @@ show_urls() {
     fi
     if [[ "$(env_val NZBHYDRA_ENABLED || true)" == "true" || "${NZBHYDRA_ENABLED:-false}" == "true" ]]; then
         printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "NZBHydra" "$NC" "$(env_val NZBHYDRA_PORT || echo "${NZBHYDRA_PORT:-5076}")"
+    fi
+    if [[ "$(env_val SUGGESTARR_ENABLED || true)" == "true" || "${SUGGESTARR_ENABLED:-false}" == "true" ]]; then
+        printf "  %b%-14s%b http://localhost:%s\n" "$BOLD" "SuggestArr" "$NC" "$(env_val SUGGESTARR_PORT || echo "${SUGGESTARR_PORT:-5000}")"
     fi
     echo "  From another device, replace localhost with this server's LAN IP."
     echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
@@ -2602,12 +2684,20 @@ case "${1:-help}" in
                 echo -e "  ${RED}✗${NC} NZBHydra2 (port ${_nzb_port}) — not reachable"
             fi
         fi
+        if [[ "$(env_val SUGGESTARR_ENABLED || true)" == "true" ]]; then
+            _suggest_port="$(env_val SUGGESTARR_PORT || echo 5000)"
+            if curl -sf --connect-timeout 2 --max-time 5 -o /dev/null "http://localhost:${_suggest_port}" 2>/dev/null; then
+                echo -e "  ${GREEN}✓${NC} SuggestArr (port ${_suggest_port}) — reachable"
+            else
+                echo -e "  ${RED}✗${NC} SuggestArr (port ${_suggest_port}) — not reachable"
+            fi
+        fi
         echo -e "\n${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
         ;;
     shell)
         if [[ -z "${2:-}" ]]; then
             echo -e "${YELLOW}Usage: ./manage.sh shell <service-name>${NC}"
-            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr nzbhydra aiostreams plex jellyfin silo"
+            echo "  Available: decypharr prowlarr byparr radarr sonarr bazarr seerr suggestarr nzbhydra aiostreams plex jellyfin silo"
             exit 1
         fi
         compose_cmd exec "$2" /bin/bash 2>/dev/null || compose_cmd exec "$2" /bin/sh
@@ -3922,6 +4012,10 @@ check_existing_installation() {
         EXISTING_NZBHYDRA_ENABLED="$(env_val NZBHYDRA_ENABLED)" || true
         EXISTING_NZBHYDRA_PORT="$(env_val NZBHYDRA_PORT)" || true
         EXISTING_NZBHYDRA_IMAGE="$(env_val NZBHYDRA_IMAGE)" || true
+        EXISTING_SUGGESTARR_ENABLED="$(env_val SUGGESTARR_ENABLED)" || true
+        EXISTING_SUGGESTARR_PORT="$(env_val SUGGESTARR_PORT)" || true
+        EXISTING_SUGGESTARR_IMAGE="$(env_val SUGGESTARR_IMAGE)" || true
+        EXISTING_SUGGESTARR_LOG_LEVEL="$(env_val SUGGESTARR_LOG_LEVEL)" || true
         EXISTING_SILO_SECRET_KEY="$(env_val SILO_SECRET_KEY)" || true
         EXISTING_SILO_PUID="$(env_val SILO_PUID)" || true
         EXISTING_SILO_PGID="$(env_val SILO_PGID)" || true
@@ -4026,6 +4120,10 @@ check_existing_installation() {
             EXISTING_NZBHYDRA_ENABLED=$(grep '^NZBHYDRA_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_NZBHYDRA_PORT=$(grep '^NZBHYDRA_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_NZBHYDRA_IMAGE=$(grep '^NZBHYDRA_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SUGGESTARR_ENABLED=$(grep '^SUGGESTARR_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SUGGESTARR_PORT=$(grep '^SUGGESTARR_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SUGGESTARR_IMAGE=$(grep '^SUGGESTARR_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_SUGGESTARR_LOG_LEVEL=$(grep '^SUGGESTARR_LOG_LEVEL=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_SECRET_KEY=$(grep '^SILO_SECRET_KEY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PUID=$(grep '^SILO_PUID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_SILO_PGID=$(grep '^SILO_PGID=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
@@ -4097,6 +4195,9 @@ main() {
             --add-nzbhydra)
                 exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${INSTALL_DIR}"
                 ;;
+            --add-suggestarr)
+                exec bash "${SCRIPT_DIR}/add-suggestarr.sh" "${INSTALL_DIR}"
+                ;;
             --add-silo-discovery)
                 exec bash "${SCRIPT_DIR}/add-silo-discovery.sh" "${INSTALL_DIR}"
                 ;;
@@ -4120,6 +4221,7 @@ main() {
                 echo "Options:"
                 echo "  --add-silo                   Add Silo to an existing running stack (/dev/dri by default)"
                 echo "  --add-nzbhydra               Add NZBHydra2 to an existing running stack (default port 5076)"
+                echo "  --add-suggestarr             Add SuggestArr recommendations to an existing running stack (default port 5000)"
                 echo "  --add-silo-discovery        Add hourly Silo-watch-history discovery (8/hour, 192/day)"
                 echo "  --refresh-management         Refresh manage.sh only (preserves configs and running containers)"
                 echo "  -y, --yes, --non-interactive  Use defaults for all prompts"
@@ -4140,6 +4242,9 @@ main() {
                 echo "  TORBOX_ENABLE_NZBHYDRA   'true' enables optional NZBHydra2 indexer aggregator"
                 echo "  TORBOX_NZBHYDRA_PORT     NZBHydra2 host port (default: 5076)"
                 echo "  TORBOX_NZBHYDRA_IMAGE    NZBHydra2 image override (default: LinuxServer latest)"
+                echo "  TORBOX_ENABLE_SUGGESTARR 'true' enables optional SuggestArr recommendation automation"
+                echo "  TORBOX_SUGGESTARR_PORT   SuggestArr host port (default: 5000)"
+                echo "  TORBOX_SUGGESTARR_IMAGE  SuggestArr image override (default: ciuse99/suggestarr:latest)"
                 echo "  TORBOX_AIOSTREAMS_USENET_MODE  'both', 'direct', or 'arr' (default: both when enabled)"
                 echo "  TORBOX_AIOSTREAMS_BASE_URL/PORT  LAN URL and host port (default: detected LAN IP:3000 / 3000)"
                 echo "  TORBOX_AIOSTREAMS_CACHE_BYTES  Disk cache bytes (default: 0; media stays off local disk)"

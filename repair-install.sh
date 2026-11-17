@@ -38,6 +38,9 @@ fi
 if grep -qE '^NZBHYDRA_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null || grep -q 'docker-compose.nzbhydra' "${ENV_FILE}" 2>/dev/null; then
     [[ -f "${SCRIPT_DIR}/docker-compose.nzbhydra.yml" ]] || die "NZBHydra is enabled but its Compose overlay is missing from the repository."
 fi
+if grep -qE '^SUGGESTARR_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null || grep -q 'docker-compose.suggestarr' "${ENV_FILE}" 2>/dev/null; then
+    [[ -f "${SCRIPT_DIR}/docker-compose.suggestarr.yml" ]] || die "SuggestArr is enabled but its Compose overlay is missing from the repository."
+fi
 command -v docker >/dev/null 2>&1 || die "Docker is not installed or is not on PATH."
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required."
 
@@ -46,7 +49,7 @@ backup_dir="${INSTALL_DIR}/backup-before-repair-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "${backup_dir}"
 [[ -f "${COMPOSE_FILE}" ]] && cp -a "${COMPOSE_FILE}" "${backup_dir}/"
 [[ -f "${DOCKERFILE}" ]] && cp -a "${DOCKERFILE}" "${backup_dir}/"
-for optional_compose in docker-compose.aiostreams.yml docker-compose.aiostreams-fuse.yml docker-compose.nzbhydra.yml; do
+for optional_compose in docker-compose.aiostreams.yml docker-compose.aiostreams-fuse.yml docker-compose.nzbhydra.yml docker-compose.suggestarr.yml; do
     [[ -f "${INSTALL_DIR}/${optional_compose}" ]] && cp -a "${INSTALL_DIR}/${optional_compose}" "${backup_dir}/"
 done
 [[ -f "${ENV_FILE}" ]] && cp -a "${ENV_FILE}" "${backup_dir}/"
@@ -90,6 +93,21 @@ if grep -qE '^NZBHYDRA_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null || grep
     mv "${env_tmp}" "${ENV_FILE}"
 else
     rm -f "${INSTALL_DIR}/docker-compose.nzbhydra.yml"
+fi
+if grep -qE '^SUGGESTARR_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null || grep -q 'docker-compose.suggestarr' "${ENV_FILE}" 2>/dev/null; then
+    cp "${SCRIPT_DIR}/docker-compose.suggestarr.yml" "${INSTALL_DIR}/docker-compose.suggestarr.yml"
+    compose_files=$(grep '^COMPOSE_FILE=' "${ENV_FILE}" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' | tr -d "'" || true)
+    compose_files="${compose_files:-docker-compose.yml}"
+    case ":${compose_files}:" in *:docker-compose.suggestarr.yml:*) ;; *) compose_files+=":docker-compose.suggestarr.yml" ;; esac
+    env_tmp=$(mktemp "${ENV_FILE}.repair.XXXXXX")
+    sed -E '/^COMPOSE_FILE=/d' "${ENV_FILE}" >"${env_tmp}"
+    printf 'COMPOSE_FILE="%s"\n' "${compose_files}" >>"${env_tmp}"
+    mv "${env_tmp}" "${ENV_FILE}"
+    CONFIG_DIR="$(grep '^CONFIG_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'" || true)"
+    CONFIG_DIR="${CONFIG_DIR:-${INSTALL_DIR}/configs}"
+    mkdir -p "${CONFIG_DIR}/suggestarr"
+else
+    rm -f "${INSTALL_DIR}/docker-compose.suggestarr.yml"
 fi
 chmod 600 "${COMPOSE_FILE}" "${ENV_FILE}"
 

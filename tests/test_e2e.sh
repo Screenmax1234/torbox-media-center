@@ -12,6 +12,7 @@ SETUP_SCRIPT="${PROJECT_ROOT}/setup.sh"
 UNINSTALL_SCRIPT="${PROJECT_ROOT}/uninstall.sh"
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
 NZBHYDRA_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.nzbhydra.yml"
+SUGGESTARR_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.suggestarr.yml"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 GITIGNORE="${PROJECT_ROOT}/.gitignore"
 
@@ -97,6 +98,18 @@ else
     fail "Existing-install NZBHydra2 add-on is missing its isolated startup path"
 fi
 
+if [[ -f "$SUGGESTARR_COMPOSE_FILE" ]] && grep -q 'ciuse99/suggestarr:latest' "$SUGGESTARR_COMPOSE_FILE" && grep -q 'SUGGESTARR_PORT:-5000}:5000' "$SUGGESTARR_COMPOSE_FILE"; then
+    pass "SuggestArr overlay exists with the documented latest image and port"
+else
+    fail "SuggestArr Compose overlay is missing or incomplete"
+fi
+
+if [[ -f "${PROJECT_ROOT}/add-suggestarr.sh" ]] && grep -q -- '--no-deps suggestarr' "${PROJECT_ROOT}/add-suggestarr.sh" && grep -q -- 'docker-compose.suggestarr.yml' "${PROJECT_ROOT}/lib/suggestarr.sh"; then
+    pass "Existing-install SuggestArr add-on preserves the active stack"
+else
+    fail "Existing-install SuggestArr add-on is missing its isolated startup path"
+fi
+
 # 2.2 Validate compose with dummy env (Jellyfin profile)
 dummy_env=(
     TORBOX_API_KEY="test1234567890abcdef1234567890ab"
@@ -154,6 +167,12 @@ if command -v docker &>/dev/null; then
         pass "NZBHydra2 overlay validates (Plex + NZBHydRA profile)"
     else
         fail "NZBHydra2 overlay validation failed"
+    fi
+    if env "${dummy_env[@]}" SUGGESTARR_PORT=5000 SUGGESTARR_IMAGE="ciuse99/suggestarr:latest" COMPOSE_PROFILES="plex,suggestarr" \
+        docker compose -f "$COMPOSE_FILE" -f "$SUGGESTARR_COMPOSE_FILE" config -q 2>/dev/null; then
+        pass "SuggestArr overlay validates (Plex + SuggestArr profile)"
+    else
+        fail "SuggestArr overlay validation failed"
     fi
 else
     warn "Docker not available — skipping compose validation"

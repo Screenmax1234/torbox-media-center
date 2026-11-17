@@ -211,6 +211,71 @@ shown by NZBHydra2. Sync Prowlarr to Radarr and Sonarr. Keep NZBHydra2 and its
 indexer credentials behind your LAN firewall; do not publish it directly to
 the internet.
 
+### Optional SuggestArr recommendation automation
+
+[SuggestArr](https://github.com/giuseppe99barchetta/SuggestArr) is the preferred
+way to grow the library automatically from viewing history. It reads history
+from Silo's Jellyfin-compatible endpoint (or Plex/Emby), gets recommendations
+from TMDb or an OpenAI-compatible service, and submits requests to Seerr. The
+normal download path remains unchanged:
+
+```text
+Silo/Jellyfin history or Trakt/Simkl
+        -> SuggestArr recommendations
+        -> Seerr requests
+        -> Radarr
+        -> Prowlarr/NZBHydra -> Decypharr -> Usenet/TorBox
+        -> Silo
+```
+
+SuggestArr is optional and stores only its configuration, job state, and cache
+under `configs/suggestarr`; movie bytes still follow the existing zero-local-
+storage path. Add it to an existing installation with:
+
+```bash
+cd /root/torbox-media-center
+git pull --ff-only
+bash setup-fixed.sh --add-suggestarr /root/torbox-media-center/torbox-media-server
+```
+
+The add-on validates the combined Compose files, pulls the latest stable
+`ciuse99/suggestarr:latest` image, and starts only SuggestArr. It does not
+restart or recreate the working media stack. The default UI is
+`http://SERVER-IP:5000`; set `TORBOX_SUGGESTARR_PORT` before the add-on if that
+port is already in use. Complete the wizard in the UI:
+
+1. Enter a TMDb API key (or select an OpenAI-compatible recommendation engine).
+2. Add the Silo/Jellyfin-compatible URL and token. From inside Compose use
+   `http://silo:8096`; from another device use `http://SERVER-IP:8097`.
+3. Add Seerr using `http://seerr:5055` from inside Compose and Seerr's API key.
+4. Select the users and movie libraries to monitor. Trakt/Simkl linking and
+   MDBList/Trakt list imports are optional.
+5. Create a scheduled movie job. Set 8 recommendations per hourly run if you
+   want the previous target of roughly 192 requests per day, then use
+   SuggestArr's request limits and its pause-while-pending option to keep the
+   queue controlled. A run may request fewer titles when Seerr, Radarr, or the
+   indexers reject a title.
+
+For a new installation, answer **yes** to the SuggestArr prompt, or use
+`TORBOX_ENABLE_SUGGESTARR=true bash setup.sh --yes`. The central management
+script includes `suggestarr` in `urls`, `status`, `health`, `logs`, `shell`, and
+image updates. Configure credentials in SuggestArr's GUI rather than putting
+them in the installer environment.
+
+The older `silo-discovery.sh` watch-history timer remains available for
+advanced use, but it is less reliable with Silo compatibility authentication.
+When using SuggestArr, disable that legacy timer so both tools do not request
+the same recommendations:
+
+```bash
+systemctl disable --now torbox-silo-discovery.timer
+```
+
+OverCrawller was not used as a dependency because a maintained upstream project
+could not be verified. SuggestArr has an active upstream project, documented
+Docker deployment, GUI scheduling, dry-run/request limits, and Trakt/Simkl
+support.
+
 ### Optional Silo watch-history discovery
 
 If you want the library to grow automatically, the repository includes an
@@ -384,6 +449,7 @@ one service.
 | Decypharr | `cy01/blackhole:latest` (local wrapper build) | `DECYPHARR_IMAGE` |
 | Prowlarr | `lscr.io/linuxserver/prowlarr:latest` | `PROWLARR_IMAGE` |
 | NZBHydra2 | `lscr.io/linuxserver/nzbhydra2:latest` | `NZBHYDRA_IMAGE` |
+| SuggestArr | `ciuse99/suggestarr:latest` | `SUGGESTARR_IMAGE` |
 | Byparr | `ghcr.io/thephaseless/byparr:latest` | `BYPARR_IMAGE` |
 | Radarr | `lscr.io/linuxserver/radarr:latest` | `RADARR_IMAGE` |
 | Sonarr | `lscr.io/linuxserver/sonarr:latest` | `SONARR_IMAGE` |
@@ -616,6 +682,7 @@ User Request                Search & Automation           Cloud Download
 | **Decypharr** | 8282 | The bridge between Radarr/Sonarr and TorBox. Pretends to be qBittorrent, mounts TorBox's cloud storage via WebDAV, and creates symlinks (shortcuts) to cloud files. Its web UI/API is available on the host LAN. |
 | **Prowlarr** | 9696 | Manages your torrent indexers (search sources). When Radarr/Sonarr need a torrent, Prowlarr searches all your configured sites. |
 | **NZBHydra2** | 5076 | Optional Usenet indexer aggregator. Add it to Prowlarr as a Newznab source after configuring its indexers. |
+| **SuggestArr** | 5000 | Optional recommendation automation. Reads media history and submits scheduled requests to Seerr. |
 | **Byparr** | 8191 | Helps Prowlarr bypass Cloudflare protection on some indexer sites. Works automatically in the background. |
 | **Radarr** | 7878 | Movie manager. Searches for movies, picks the best quality torrent, sends it to Decypharr, and organizes your movie library. |
 | **Sonarr** | 8989 | TV show manager. Same as Radarr but for TV series - handles seasons, episodes, and ongoing shows automatically. |
@@ -852,6 +919,7 @@ cd torbox-media-server/
 ./manage.sh logs      # View all logs (follow mode)
 ./manage.sh logs radarr  # View specific service logs
 ./manage.sh logs bazarr  # View subtitle service logs
+./manage.sh logs suggestarr  # View recommendation automation logs (when enabled)
 ./manage.sh pull      # Pull latest stable images without restarting
 ./manage.sh update    # Pull latest stable images and restart
 ./manage.sh down      # Stop and remove containers
@@ -1048,6 +1116,9 @@ The following environment variables can be set before running `bash setup.sh --y
 | `TORBOX_ENABLE_AIOSTREAMS` | `false` | Enable the optional AIOStreams container and Usenet integration |
 | `TORBOX_ENABLE_NZBHYDRA` | `false` | Enable the optional NZBHydra2 indexer aggregator |
 | `TORBOX_NZBHYDRA_PORT` | `5076` | Host port for the NZBHydra2 web UI |
+| `TORBOX_ENABLE_SUGGESTARR` | `false` | Enable SuggestArr recommendation automation |
+| `TORBOX_SUGGESTARR_PORT` | `5000` | Host port for the SuggestArr web UI |
+| `SUGGESTARR_IMAGE` | `ciuse99/suggestarr:latest` | SuggestArr image override |
 | `TORBOX_AIOSTREAMS_USENET_MODE` | `both` when enabled | `both`, `direct`, or `arr` |
 | `TORBOX_AIOSTREAMS_PORT` | `3000` | Host port for the AIOStreams dashboard/API |
 | `TORBOX_AIOSTREAMS_BASE_URL` | Detected LAN IP and port 3000 (localhost fallback) | URL placed in generated AIOStreams links; set a stable LAN hostname or HTTPS URL when needed |
