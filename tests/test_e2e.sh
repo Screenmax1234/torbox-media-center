@@ -13,6 +13,7 @@ UNINSTALL_SCRIPT="${PROJECT_ROOT}/uninstall.sh"
 COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.yml"
 NZBHYDRA_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.nzbhydra.yml"
 SUGGESTARR_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.suggestarr.yml"
+LISTSEERR_COMPOSE_FILE="${PROJECT_ROOT}/docker-compose.listseerr.yml"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 GITIGNORE="${PROJECT_ROOT}/.gitignore"
 
@@ -110,6 +111,24 @@ else
     fail "Existing-install SuggestArr add-on is missing its isolated startup path"
 fi
 
+if [[ -f "$LISTSEERR_COMPOSE_FILE" ]] && grep -q 'ghcr.io/guillevc/listseerr:latest' "$LISTSEERR_COMPOSE_FILE" && grep -q 'LISTSEERR_PORT:-3001}:3000' "$LISTSEERR_COMPOSE_FILE" && grep -q 'LISTSEERR_ENCRYPTION_KEY' "$LISTSEERR_COMPOSE_FILE"; then
+    pass "Listseerr overlay exists with the documented image, port and encryption key"
+else
+    fail "Listseerr Compose overlay is missing or incomplete"
+fi
+
+if [[ -f "${PROJECT_ROOT}/add-listseerr.sh" ]] && grep -q -- '--no-deps listseerr' "${PROJECT_ROOT}/add-listseerr.sh" && grep -q -- 'docker-compose.listseerr.yml' "${PROJECT_ROOT}/lib/listseerr.sh"; then
+    pass "Existing-install Listseerr add-on preserves the active stack"
+else
+    fail "Existing-install Listseerr add-on is missing its isolated startup path"
+fi
+
+if [[ -f "${PROJECT_ROOT}/remove-suggestarr.sh" ]] && grep -q 'docker rm -f suggestarr' "${PROJECT_ROOT}/remove-suggestarr.sh" && grep -q 'docker-compose.suggestarr.yml' "${PROJECT_ROOT}/remove-suggestarr.sh"; then
+    pass "SuggestArr removal helper removes only its container and overlay"
+else
+    fail "SuggestArr removal helper is missing or incomplete"
+fi
+
 # 2.2 Validate compose with dummy env (Jellyfin profile)
 dummy_env=(
     TORBOX_API_KEY="test1234567890abcdef1234567890ab"
@@ -173,6 +192,12 @@ if command -v docker &>/dev/null; then
         pass "SuggestArr overlay validates (Plex + SuggestArr profile)"
     else
         fail "SuggestArr overlay validation failed"
+    fi
+    if env "${dummy_env[@]}" LISTSEERR_PORT=3001 LISTSEERR_IMAGE="ghcr.io/guillevc/listseerr:latest" LISTSEERR_ENCRYPTION_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" COMPOSE_PROFILES="plex,listseerr" \
+        docker compose -f "$COMPOSE_FILE" -f "$LISTSEERR_COMPOSE_FILE" config -q 2>/dev/null; then
+        pass "Listseerr overlay validates (Plex + Listseerr profile)"
+    else
+        fail "Listseerr overlay validation failed"
     fi
 else
     warn "Docker not available — skipping compose validation"

@@ -1,0 +1,22 @@
+# Optional Listseerr list-to-Seerr automation.
+services:
+  listseerr:
+    image: ${LISTSEERR_IMAGE:-ghcr.io/guillevc/listseerr:latest}
+    profiles: [listseerr]
+    container_name: listseerr
+    restart: unless-stopped
+    networks: [media-network]
+    ports:
+      - "${LISTSEERR_PORT:-3001}:3000"
+    environment:
+      PORT: "3000"
+      TZ: "${TZ:-UTC}"
+      LOG_LEVEL: "${LISTSEERR_LOG_LEVEL:-info}"
+      ENCRYPTION_KEY: "${LISTSEERR_ENCRYPTION_KEY:?LISTSEERR_ENCRYPTION_KEY is required}"
+    volumes:
+      - "${CONFIG_DIR}/listseerr:/app/data"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
