@@ -184,6 +184,31 @@ with `http://seerr:5055` and Seerr's API key. Choose one request routing approac
 for the same titles. Silo does not add a supported server type to Seerr's own
 initial setup wizard.
 
+## Optional watch-history discovery
+
+The repository can periodically turn a Silo viewer's watched movies into
+Radarr searches. Enable it without restarting the stack:
+
+```bash
+cd /root/torbox-media-center
+bash setup-fixed.sh --add-silo-discovery /root/torbox-media-center/torbox-media-server
+```
+
+Enable Jellyfin compatibility in Silo first and use an account that can see
+the movie library. The add-on uses `POST /Users/AuthenticateByName`, recent
+played movies, and the compatible `/Items/{id}/Similar` endpoint. If a Silo
+build does not expose that optional endpoint, it tries
+`/Movies/Recommendations`; otherwise it logs a warning and adds nothing.
+
+The default systemd timer runs hourly and asks Radarr to add/search at most
+8 movies per run and 192 per day. `./manage.sh discovery-once --dry-run`
+shows what would be queued, while `discovery-status` displays the current
+counter and timer state. Set `SILO_DISCOVERY_QUALITY_PROFILE` to the exact
+Radarr profile you want (for example a 4K profile). The scheduler only stores
+small state under `configs/silo-discovery`; it does not enable AIOStreams or
+change Decypharr's empty Usenet disk path. On non-systemd hosts, schedule
+`./silo-discovery.sh once` with cron.
+
 ## Automatic subtitles with Bazarr
 
 The central installer also starts Bazarr at `http://SERVER-IP:6767` and connects

@@ -50,10 +50,16 @@ for optional_compose in docker-compose.aiostreams.yml docker-compose.aiostreams-
     [[ -f "${INSTALL_DIR}/${optional_compose}" ]] && cp -a "${INSTALL_DIR}/${optional_compose}" "${backup_dir}/"
 done
 [[ -f "${ENV_FILE}" ]] && cp -a "${ENV_FILE}" "${backup_dir}/"
+[[ -f "${INSTALL_DIR}/silo-discovery.sh" ]] && cp -a "${INSTALL_DIR}/silo-discovery.sh" "${backup_dir}/"
 [[ -f "${INSTALL_DIR}/configs/bazarr/config.yaml" ]] && mkdir -p "${backup_dir}/configs/bazarr" && cp -a "${INSTALL_DIR}/configs/bazarr/config.yaml" "${backup_dir}/configs/bazarr/"
 
 cp "${SCRIPT_DIR}/docker-compose.yml" "${COMPOSE_FILE}"
 cp "${SCRIPT_DIR}/Dockerfile.decypharr" "${DOCKERFILE}"
+if grep -qE '^SILO_DISCOVERY_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null; then
+    [[ -f "${SCRIPT_DIR}/silo-discovery.sh" ]] || die "Silo discovery is enabled but silo-discovery.sh is missing from the repository."
+    cp "${SCRIPT_DIR}/silo-discovery.sh" "${INSTALL_DIR}/silo-discovery.sh"
+    chmod 700 "${INSTALL_DIR}/silo-discovery.sh"
+fi
 if grep -qE '^AIOSTREAMS_ENABLED=.*(true|1|yes)' "${ENV_FILE}" 2>/dev/null || grep -q 'docker-compose.aiostreams' "${ENV_FILE}" 2>/dev/null; then
     cp "${SCRIPT_DIR}/docker-compose.aiostreams.yml" "${INSTALL_DIR}/docker-compose.aiostreams.yml"
     cp "${SCRIPT_DIR}/docker-compose.aiostreams-fuse.yml" "${INSTALL_DIR}/docker-compose.aiostreams-fuse.yml"

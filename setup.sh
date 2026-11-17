@@ -1799,6 +1799,24 @@ ENV_EOF
         } >>"${ENV_FILE}"
     fi
 
+    # Preserve the optional Silo discovery add-on across a normal setup rerun.
+    if [[ "${EXISTING_SILO_DISCOVERY_ENABLED:-}" == "true" ]]; then
+        {
+            echo ""
+            echo "# Optional Silo watch-history discovery"
+            printf 'SILO_DISCOVERY_ENABLED=%s\n' '"true"'
+            printf 'SILO_DISCOVERY_USER=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_USER:-}")"
+            printf 'SILO_DISCOVERY_PASS=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_PASS:-}")"
+            printf 'SILO_DISCOVERY_JF_URL=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_JF_URL:-http://127.0.0.1:8097}")"
+            printf 'SILO_DISCOVERY_RADARR_URL=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_RADARR_URL:-http://127.0.0.1:7878}")"
+            printf 'SILO_DISCOVERY_BATCH_SIZE=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_BATCH_SIZE:-8}")"
+            printf 'SILO_DISCOVERY_DAILY_LIMIT=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_DAILY_LIMIT:-192}")"
+            printf 'SILO_DISCOVERY_LOOKBACK=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_LOOKBACK:-20}")"
+            printf 'SILO_DISCOVERY_QUALITY_PROFILE=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_QUALITY_PROFILE:-Any}")"
+            printf 'SILO_DISCOVERY_ROOT_FOLDER=%s\n' "$(dotenv_quote "${EXISTING_SILO_DISCOVERY_ROOT_FOLDER:-/data/media/movies}")"
+        } >>"${ENV_FILE}"
+    fi
+
     if [[ "${AIOSTREAMS_ENABLED:-false}" == "true" ]]; then
         # AIOStreams uses these runtime values for its built-in Usenet engine.
         # The indexer URL/key are retained for the dashboard because Newznab
@@ -2191,6 +2209,9 @@ show_help() {
     echo "  urls        Show all service URLs"
     echo "  keys        Show API keys"
     echo "  reset-auth  Push admin passwords from .env into Radarr/Sonarr/Prowlarr"
+    echo "  discovery-once  Run one optional Silo watch-history discovery batch"
+    echo "  discovery-status  Show discovery limits, state, and scheduler status"
+    echo "  discovery-logs  Show the hourly discovery service log"
     echo "  enable      Enable auto-start on boot"
     echo "  disable     Disable auto-start on boot"
     echo "  backup      Back up configs and .env (briefly stops Silo if enabled)"
@@ -2361,6 +2382,25 @@ reset_auth_cmd() {
     echo -e "Use ${BOLD}./manage.sh keys --show-secrets${NC} to view credentials."
 }
 
+discovery_cmd() {
+    local cmd="$1"
+    local discovery_script="${SCRIPT_DIR}/silo-discovery.sh"
+    if [[ ! -x "$discovery_script" ]]; then
+        echo -e "${YELLOW}Silo discovery is not installed. Run the repository's setup-fixed.sh --add-silo-discovery ${SCRIPT_DIR}${NC}"
+        return 1
+    fi
+    case "$cmd" in
+        once) exec bash "$discovery_script" "${2:-once}" ;;
+        status) exec bash "$discovery_script" status ;;
+        logs)
+            if command -v journalctl &>/dev/null && [[ -f /etc/systemd/system/torbox-silo-discovery.service ]]; then
+                exec journalctl -u torbox-silo-discovery.service -n 100 --no-pager
+            fi
+            echo "No systemd discovery log is available; run ./silo-discovery.sh once directly."
+            ;;
+    esac
+}
+
 case "${1:-help}" in
     start)
         echo -e "${GREEN}Starting all services...${NC}"
@@ -2412,6 +2452,15 @@ case "${1:-help}" in
         ;;
     reset-auth)
         reset_auth_cmd
+        ;;
+    discovery-once)
+        discovery_cmd once "${2:-once}"
+        ;;
+    discovery-status)
+        discovery_cmd status
+        ;;
+    discovery-logs)
+        discovery_cmd logs
         ;;
     enable)
         if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
@@ -3784,6 +3833,16 @@ EXISTING_SILO_OMNIBUS_IMAGE=""
 EXISTING_SILO_ADMIN_USER=""
 EXISTING_SILO_ADMIN_EMAIL=""
 EXISTING_SILO_ADMIN_PASS=""
+EXISTING_SILO_DISCOVERY_ENABLED=""
+EXISTING_SILO_DISCOVERY_USER=""
+EXISTING_SILO_DISCOVERY_PASS=""
+EXISTING_SILO_DISCOVERY_JF_URL=""
+EXISTING_SILO_DISCOVERY_RADARR_URL=""
+EXISTING_SILO_DISCOVERY_BATCH_SIZE=""
+EXISTING_SILO_DISCOVERY_DAILY_LIMIT=""
+EXISTING_SILO_DISCOVERY_LOOKBACK=""
+EXISTING_SILO_DISCOVERY_QUALITY_PROFILE=""
+EXISTING_SILO_DISCOVERY_ROOT_FOLDER=""
 EXISTING_COMPOSE_FILE=""
 EXISTING_AIOSTREAMS_ENABLED=""
 EXISTING_AIOSTREAMS_PORT=""
@@ -3875,6 +3934,16 @@ check_existing_installation() {
         EXISTING_SILO_ADMIN_USER="$(env_val SILO_ADMIN_USER)" || true
         EXISTING_SILO_ADMIN_EMAIL="$(env_val SILO_ADMIN_EMAIL)" || true
         EXISTING_SILO_ADMIN_PASS="$(env_val SILO_ADMIN_PASS)" || true
+        EXISTING_SILO_DISCOVERY_ENABLED="$(env_val SILO_DISCOVERY_ENABLED)" || true
+        EXISTING_SILO_DISCOVERY_USER="$(env_val SILO_DISCOVERY_USER)" || true
+        EXISTING_SILO_DISCOVERY_PASS="$(env_val SILO_DISCOVERY_PASS)" || true
+        EXISTING_SILO_DISCOVERY_JF_URL="$(env_val SILO_DISCOVERY_JF_URL)" || true
+        EXISTING_SILO_DISCOVERY_RADARR_URL="$(env_val SILO_DISCOVERY_RADARR_URL)" || true
+        EXISTING_SILO_DISCOVERY_BATCH_SIZE="$(env_val SILO_DISCOVERY_BATCH_SIZE)" || true
+        EXISTING_SILO_DISCOVERY_DAILY_LIMIT="$(env_val SILO_DISCOVERY_DAILY_LIMIT)" || true
+        EXISTING_SILO_DISCOVERY_LOOKBACK="$(env_val SILO_DISCOVERY_LOOKBACK)" || true
+        EXISTING_SILO_DISCOVERY_QUALITY_PROFILE="$(env_val SILO_DISCOVERY_QUALITY_PROFILE)" || true
+        EXISTING_SILO_DISCOVERY_ROOT_FOLDER="$(env_val SILO_DISCOVERY_ROOT_FOLDER)" || true
 
         # Extract existing admin credentials
         EXISTING_RADARR_ADMIN_USER="$(env_val RADARR_ADMIN_USER)" || true
@@ -4028,6 +4097,9 @@ main() {
             --add-nzbhydra)
                 exec bash "${SCRIPT_DIR}/add-nzbhydra.sh" "${INSTALL_DIR}"
                 ;;
+            --add-silo-discovery)
+                exec bash "${SCRIPT_DIR}/add-silo-discovery.sh" "${INSTALL_DIR}"
+                ;;
             --refresh-management)
                 if [[ ! -f "${ENV_FILE}" ]]; then
                     log_error "No existing .env found at ${ENV_FILE}. Run setup first or set TORBOX_INSTALL_DIR."
@@ -4048,6 +4120,7 @@ main() {
                 echo "Options:"
                 echo "  --add-silo                   Add Silo to an existing running stack (/dev/dri by default)"
                 echo "  --add-nzbhydra               Add NZBHydra2 to an existing running stack (default port 5076)"
+                echo "  --add-silo-discovery        Add hourly Silo-watch-history discovery (8/hour, 192/day)"
                 echo "  --refresh-management         Refresh manage.sh only (preserves configs and running containers)"
                 echo "  -y, --yes, --non-interactive  Use defaults for all prompts"
                 echo "  -d, --dry-run                 Preview changes without applying them"
@@ -4076,6 +4149,7 @@ main() {
                 echo "  TORBOX_DECYPHARR_USENET_PRIORITY  Arr client priority (default: 0, preferred)"
                 echo "  TORBOX_DECYPHARR_USENET_DISK_PATH  Empty keeps native Usenet media off local disk"
                 echo "  TORBOX_NEWZNAB_URL/API_KEY  Optional indexer details saved for AIOStreams dashboard setup"
+                echo "  SILO_DISCOVERY_*            Optional watch-history discovery settings (use --add-silo-discovery)"
                 echo "  SYNC_AUTH_ONLY       Set to 'true' to only re-sync admin credentials to running *arrs"
                 echo "  TORBOX_START_SERVICES 'true' or 'false' (default: true)"
                 exit 0

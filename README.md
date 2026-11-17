@@ -211,6 +211,60 @@ shown by NZBHydra2. Sync Prowlarr to Radarr and Sonarr. Keep NZBHydra2 and its
 indexer credentials behind your LAN firewall; do not publish it directly to
 the internet.
 
+### Optional Silo watch-history discovery
+
+If you want the library to grow automatically, the repository includes an
+optional scheduler that follows the movies a viewer has watched in Silo and
+asks Radarr to add similar movies. It uses Silo's Jellyfin-compatible API on
+port `8097`, then follows the normal Radarr → Prowlarr/NZBHydra →
+Decypharr/Usenet or TorBox path. AIOStreams is not enabled or required.
+
+Enable it on an existing Silo installation with:
+
+```bash
+cd /root/torbox-media-center
+git pull --ff-only
+bash setup-fixed.sh --add-silo-discovery /root/torbox-media-center/torbox-media-server
+```
+
+The add-on asks for a Silo/Jellyfin-compatible account. A normal viewer
+account is preferred; the Silo administrator also works if that account can
+see the movie library. The account must have watched movies in its history.
+The add-on writes the credentials only to the installed mode-600 `.env`,
+creates `configs/silo-discovery/state.json`, and enables a systemd timer. It
+does not restart Docker or regenerate the Silo database.
+
+The defaults are **up to 8 movies per hour** and **192 per day**. Each run
+reads the most recent watched movies, requests similar titles, ignores movies
+already present in Radarr, and adds at most the remaining hourly allowance with
+`searchForMovie=true`. Radarr's selected quality profile controls whether a
+release is eligible; set `SILO_DISCOVERY_QUALITY_PROFILE` to the exact profile
+name if `Any` is not your preferred profile. The default Radarr root folder is
+`/data/media/movies`.
+
+Test the integration without adding anything:
+
+```bash
+cd /root/torbox-media-center/torbox-media-server
+./manage.sh discovery-once --dry-run
+./manage.sh discovery-status
+./manage.sh discovery-logs
+```
+
+Useful installed settings are `SILO_DISCOVERY_BATCH_SIZE`,
+`SILO_DISCOVERY_DAILY_LIMIT`, `SILO_DISCOVERY_LOOKBACK`,
+`SILO_DISCOVERY_QUALITY_PROFILE`, and `SILO_DISCOVERY_ROOT_FOLDER`. Edit the
+private `.env`, then run `./manage.sh discovery-status`; the next hourly run
+uses the new values. On systems without systemd, run
+`./silo-discovery.sh once` from a cron job instead.
+
+This feature preserves the zero-local-media-storage design: it only stores
+small state and API metadata locally. Decypharr's `DECYPHARR_USENET_DISK_PATH`
+stays empty, while the existing HDD bind mount provides the filesystem
+capacity Radarr requires. A run can add fewer than eight movies when Silo has
+no recommendations, Radarr cannot resolve a title, or the indexers have no
+eligible release. Use this only for titles you are authorized to access.
+
 ### Usenet releases rejected for free disk space
 
 Radarr and Sonarr enforce a minimum import floor of 100 MB; their current
@@ -803,6 +857,9 @@ cd torbox-media-server/
 ./manage.sh keys      # Show API keys (use with care)
 ./manage.sh keys --show-secrets  # Show API keys unmasked
 ./manage.sh reset-auth  # Re-push .env admin credentials to Radarr/Sonarr/Prowlarr
+./manage.sh discovery-once --dry-run # Preview one Silo recommendation batch
+./manage.sh discovery-status          # Show limits, state, and timer status
+./manage.sh discovery-logs            # Show scheduler logs
 ./manage.sh enable    # Enable auto-start on boot
 ./manage.sh disable   # Disable auto-start on boot
 ./manage.sh backup    # Backup configuration and credentials
@@ -975,6 +1032,13 @@ The following environment variables can be set before running `bash setup.sh --y
 | `TORBOX_SILO_ADMIN_USER` | `admin` | First Silo administrator username; preserved after creation |
 | `TORBOX_SILO_ADMIN_EMAIL` | `admin@torbox.local` | First Silo administrator email; use a dotted domain |
 | `TORBOX_SILO_ADMIN_PASS` | *(generated)* | First Silo administrator password; saved in the private installed `.env` |
+| `SILO_DISCOVERY_ENABLED` | `false` | Enables the optional Silo watch-history discovery timer |
+| `SILO_DISCOVERY_USER/PASS` | *(empty)* | Silo/Jellyfin-compatible account used to read watched movies; stored only in the installed `.env` |
+| `SILO_DISCOVERY_BATCH_SIZE` | `8` | Maximum movies added per hourly run |
+| `SILO_DISCOVERY_DAILY_LIMIT` | `192` | Maximum movies added per local calendar day |
+| `SILO_DISCOVERY_LOOKBACK` | `20` | Number of recently watched movies used as recommendation seeds |
+| `SILO_DISCOVERY_QUALITY_PROFILE` | `Any` | Radarr quality profile name; set to your 4K/UHD profile if desired |
+| `SILO_DISCOVERY_ROOT_FOLDER` | `/data/media/movies` | Radarr root folder used for discovered movies |
 | `TORBOX_PLEX_CLAIM` | *(empty)* | Plex claim token from [plex.tv/claim](https://www.plex.tv/claim/) |
 | `TORBOX_MOUNT_DIR` | `/mnt/torbox-media` | Custom mount directory for rclone FUSE mount |
 | `TORBOX_HW_ACCEL` | *(auto-detected)* | Hardware acceleration: `none`, `intel`, `amd`, or `nvidia` |

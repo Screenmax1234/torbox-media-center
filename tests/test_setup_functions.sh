@@ -576,6 +576,38 @@ test_default_indexer() {
     fi
 }
 
+test_silo_discovery_addon() {
+    local root="${SCRIPT_DIR}/.."
+    if [[ -f "${root}/silo-discovery.sh" && -f "${root}/add-silo-discovery.sh" && -f "${root}/setup-fixed.sh" ]] &&
+        grep -q -- '--add-silo-discovery' "${root}/setup-fixed.sh" &&
+        grep -q 'SILO_DISCOVERY_BATCH_SIZE=.*:-8' "${root}/add-silo-discovery.sh" &&
+        grep -q 'SILO_DISCOVERY_DAILY_LIMIT=.*:-192' "${root}/add-silo-discovery.sh"; then
+        pass "Silo discovery add-on and 8/hour, 192/day defaults are present"
+    else
+        fail "Silo discovery add-on or defaults are missing"
+    fi
+}
+
+test_silo_discovery_is_independent_of_aiostreams() {
+    local root="${SCRIPT_DIR}/.."
+    if ! grep -q 'AIOSTREAMS' "${root}/silo-discovery.sh" &&
+        grep -q 'DECYPHARR_USENET_DISK_PATH' "${root}/README.md" &&
+        grep -q 'AIOStreams is not enabled or required' "${root}/README.md"; then
+        pass "Silo discovery does not depend on AIOStreams and preserves zero-storage docs"
+    else
+        fail "Silo discovery unexpectedly depends on AIOStreams or lacks zero-storage docs"
+    fi
+}
+
+test_silo_discovery_syntax() {
+    local root="${SCRIPT_DIR}/.."
+    if bash -n "${root}/silo-discovery.sh" && bash -n "${root}/add-silo-discovery.sh"; then
+        pass "Silo discovery scripts have valid Bash syntax"
+    else
+        fail "Silo discovery scripts have invalid Bash syntax"
+    fi
+}
+
 test_yes_flag_support
 test_dry_run_support
 test_version_flag_support
@@ -583,6 +615,9 @@ test_hw_auto_detect
 test_seerr_auto_config
 test_plex_library_auto_config
 test_default_indexer
+test_silo_discovery_addon
+test_silo_discovery_is_independent_of_aiostreams
+test_silo_discovery_syntax
 
 echo ""
 echo "--- Architecture tests ---"

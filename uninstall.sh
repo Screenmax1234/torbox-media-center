@@ -135,6 +135,9 @@ if command -v systemctl &>/dev/null && [[ -d /run/systemd/system ]]; then
     sudo systemctl stop "${SERVICE_NAME}" 2>/dev/null || true
     sudo systemctl disable "${SERVICE_NAME}" 2>/dev/null || true
     sudo rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+    sudo systemctl stop torbox-silo-discovery.timer 2>/dev/null || true
+    sudo systemctl disable torbox-silo-discovery.timer 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/torbox-silo-discovery.timer /etc/systemd/system/torbox-silo-discovery.service
     sudo systemctl daemon-reload || true
     log_info "Systemd service '${SERVICE_NAME}' removed."
 else
