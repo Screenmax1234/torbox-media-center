@@ -40,7 +40,9 @@ copy_tree() {
     local source="$1" target="$2"
     mkdir -p "${target}"
     if command -v rsync >/dev/null 2>&1; then
-        rsync -aHAX "${source}/" "${target}/"
+        # Do not cross nested Proxmox HDD mounts when copying a parent such as
+        # DATA_DIR; media and downloads must never be duplicated locally.
+        rsync -aHAXx "${source}/" "${target}/"
     else
         cp -a "${source}/." "${target}/"
     fi
@@ -61,9 +63,16 @@ DATA_MOVED=false
 if [[ -d "${DATA_DIR}" ]]; then
     data_device=$(df -P "${DATA_DIR}" | awk 'NR==2 {print $1}')
     if [[ "${data_device}" != "${target_device}" ]]; then
-        info "Copying DATA_DIR to ${TARGET_DATA}."
-        copy_tree "${DATA_DIR}" "${TARGET_DATA}"
-        DATA_MOVED=true
+        media_device=$(df -P "${DATA_DIR}/media" 2>/dev/null | awk 'NR==2 {print $1}')
+        downloads_device=$(df -P "${DATA_DIR}/downloads" 2>/dev/null | awk 'NR==2 {print $1}')
+        if [[ -n "${media_device}" && "${media_device}" != "${data_device}" ]] ||
+            [[ -n "${downloads_device}" && "${downloads_device}" != "${data_device}" ]]; then
+            info "DATA_DIR contains separate media/download HDD mounts; leaving DATA_DIR in place."
+        else
+            info "Copying DATA_DIR to ${TARGET_DATA}."
+            copy_tree "${DATA_DIR}" "${TARGET_DATA}"
+            DATA_MOVED=true
+        fi
     else
         info "DATA_DIR is already on the target filesystem; leaving it in place."
     fi
