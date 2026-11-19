@@ -54,6 +54,10 @@ services:
       # propagate nested LXC mounts through a parent bind on every host.
       - "${DATA_DIR}/media:/data/media"
       - "${DATA_DIR}/downloads:/data/downloads"
+      # Decypharr's Usenet segment cache is created as /tmp/usenet-cache-*.
+      # Keep the entire temporary workspace on the HDD instead of the Docker
+      # writable layer, which otherwise fills the LXC root disk.
+      - "${DATA_DIR}/downloads/decypharr-tmp:/tmp"
     devices:
       - /dev/fuse:/dev/fuse:rwm
     cap_add:

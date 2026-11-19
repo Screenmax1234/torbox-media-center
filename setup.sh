@@ -1599,6 +1599,8 @@ create_directories() {
         mkdir -p "${CONFIG_DIR}/listseerr"
     fi
     mkdir -p "${DATA_DIR}"/{media/{movies,tv},downloads/{radarr,sonarr}}
+    mkdir -p "${DATA_DIR}/downloads/decypharr-tmp"
+    chmod 1777 "${DATA_DIR}/downloads/decypharr-tmp" 2>/dev/null || true
 
     if [[ "$MEDIA_SERVER" == "plex" ]]; then
         mkdir -p "${CONFIG_DIR}/plex"

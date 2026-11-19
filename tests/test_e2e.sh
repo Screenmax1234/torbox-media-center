@@ -87,7 +87,7 @@ else
     fail "docker-compose.yml not found"
 fi
 
-if grep -q '\${DATA_DIR}/media:/data/media' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/downloads:/data/downloads' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/media:/data/media:ro' "$PROJECT_ROOT/docker-compose.silo.yml"; then
+if grep -q '\${DATA_DIR}/media:/data/media' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/downloads:/data/downloads' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/downloads/decypharr-tmp:/tmp' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/media:/data/media:ro' "$PROJECT_ROOT/docker-compose.silo.yml"; then
     pass "Nested HDD media/download mounts are explicit for Docker containers"
 else
     fail "Nested HDD media/download mounts are missing"
