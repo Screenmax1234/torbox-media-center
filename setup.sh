@@ -4043,6 +4043,8 @@ EXISTING_DECYPHARR_USENET_PRIORITY=""
 EXISTING_NZBHYDRA_ENABLED=""
 EXISTING_NZBHYDRA_PORT=""
 EXISTING_NZBHYDRA_IMAGE=""
+EXISTING_CONFIG_DIR=""
+EXISTING_DATA_DIR=""
 
 check_existing_installation() {
     if [[ -f "${SETUP_COMPLETE_FILE}" ]]; then
@@ -4099,6 +4101,8 @@ check_existing_installation() {
         [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
         EXISTING_DECYPHARR_USENET_DISK_PATH="$(env_val DECYPHARR_USENET_DISK_PATH)" || true
         EXISTING_DECYPHARR_USENET_PRIORITY="$(env_val DECYPHARR_USENET_PRIORITY)" || true
+        EXISTING_CONFIG_DIR="$(env_val CONFIG_DIR)" || true
+        EXISTING_DATA_DIR="$(env_val DATA_DIR)" || true
         EXISTING_NZBHYDRA_ENABLED="$(env_val NZBHYDRA_ENABLED)" || true
         EXISTING_NZBHYDRA_PORT="$(env_val NZBHYDRA_PORT)" || true
         EXISTING_NZBHYDRA_IMAGE="$(env_val NZBHYDRA_IMAGE)" || true
@@ -4164,6 +4168,8 @@ check_existing_installation() {
             log_info "Existing API keys loaded and will be preserved."
         fi
         echo ""
+        [[ -n "${EXISTING_CONFIG_DIR}" ]] && CONFIG_DIR="${EXISTING_CONFIG_DIR}"
+        [[ -n "${EXISTING_DATA_DIR}" ]] && DATA_DIR="${EXISTING_DATA_DIR}"
     elif [[ -f "${ENV_FILE}" && ! -f "${SETUP_COMPLETE_FILE}" ]]; then
         # .env exists but .setup_complete doesn't — previous run was interrupted.
         # In interactive mode, ask the user what to do; in non-interactive mode,
@@ -4212,6 +4218,8 @@ check_existing_installation() {
             [[ -n "$EXISTING_DECYPHARR_USENET_PROVIDERS" ]] || EXISTING_DECYPHARR_USENET_PROVIDERS="[]"
             EXISTING_DECYPHARR_USENET_DISK_PATH=$(grep '^DECYPHARR_USENET_DISK_PATH=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_DECYPHARR_USENET_PRIORITY=$(grep '^DECYPHARR_USENET_PRIORITY=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_CONFIG_DIR=$(grep '^CONFIG_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
+            EXISTING_DATA_DIR=$(grep '^DATA_DIR=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_NZBHYDRA_ENABLED=$(grep '^NZBHYDRA_ENABLED=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_NZBHYDRA_PORT=$(grep '^NZBHYDRA_PORT=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             EXISTING_NZBHYDRA_IMAGE=$(grep '^NZBHYDRA_IMAGE=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
@@ -4238,6 +4246,8 @@ check_existing_installation() {
             EXISTING_SILO_ADMIN_PASS=$(grep '^SILO_ADMIN_PASS=' "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr -d "'") || true
             DECYPHARR_USER=$(grep "^DECYPHARR_USER=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
             DECYPHARR_PASS=$(grep "^DECYPHARR_PASS=" "${ENV_FILE}" 2>/dev/null | cut -d= -f2- | tr -d "\"" | tr -d "'") || true
+            [[ -n "${EXISTING_CONFIG_DIR}" ]] && CONFIG_DIR="${EXISTING_CONFIG_DIR}"
+            [[ -n "${EXISTING_DATA_DIR}" ]] && DATA_DIR="${EXISTING_DATA_DIR}"
         fi
         echo ""
     fi

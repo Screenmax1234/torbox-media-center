@@ -517,6 +517,45 @@ cd /root/torbox-media-center/torbox-media-server
 
 `./manage.sh update` pulls the published images, rebuilds Decypharr and restarts the stack. It does not fetch a newer Compose file from GitHub. Repeat the `git pull` plus `setup-fixed.sh --repair` sequence when this repository publishes installer changes.
 
+### Diagnosing and moving root-disk growth
+
+Movie files should remain on the mounted media filesystem, but Silo keeps local
+PostgreSQL metadata, artwork, plugins and temporary transcode/download files.
+Docker images, build cache and container logs can also use the LXC root disk.
+Run the report from the source checkout to see which path is actually growing:
+
+```bash
+cd /root/torbox-media-center
+bash setup-fixed.sh --storage-report /root/torbox-media-center/torbox-media-server
+```
+
+If the HDD is mounted inside the LXC at `/data` (verify with `df -hT /data`),
+move the configuration and Silo work directories to a separate HDD directory:
+
+```bash
+bash setup-fixed.sh --migrate-storage \
+  /root/torbox-media-center/torbox-media-server \
+  /data/torbox-system
+```
+
+The migration stops the stack, copies `configs/` and `silo-work/`, and also
+moves `DATA_DIR` when it is still on the root filesystem. If `DATA_DIR` is
+already on the HDD, it is left in place. The installed `.env` is updated,
+Compose is validated, and the stack starts again. Container paths remain
+`/data/media` and `/data/downloads`, so Radarr/Sonarr paths and the
+zero-local-media design are preserved. The original directories are retained
+as a rollback copy. Confirm
+that Silo, Radarr, Seerr, Bazarr and Listseerr work, then remove only the old
+copies reported by the script. Do not delete them while a service is still
+using the old path.
+
+If the report identifies Docker build cache or old images instead, review them
+with `docker system df`; remove only unused cache/images after confirming no
+active service depends on them. Transcode files should normally fall after
+playback ends; persistent growth under `configs/silo/artwork` or
+`configs/silo/postgres` is Silo metadata/cache growth and is safe to place on
+the HDD with the migration above.
+
 For a non-destructive connection check after upgrading:
 
 ```bash
