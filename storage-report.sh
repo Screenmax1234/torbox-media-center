@@ -21,6 +21,18 @@ SILO_WORK_DIR="${SILO_WORK_DIR:-${INSTALL_DIR}/silo-work}"
 echo "TorBox storage report"
 echo "Install: ${INSTALL_DIR}"
 echo ""
+printf '[Root filesystem usage]\n'
+df -hT / 2>/dev/null || true
+du -xhd1 / 2>/dev/null | sort -h | tail -n 20 || true
+if [[ -d /var/lib/docker ]]; then
+    printf '\n[/var/lib/docker breakdown]\n'
+    du -xhd2 /var/lib/docker 2>/dev/null | sort -h | tail -n 30 || true
+fi
+if command -v lsof >/dev/null 2>&1; then
+    printf '\n[Deleted files still held open]\n'
+    lsof +L1 2>/dev/null | tail -n +2 | head -n 30 || true
+fi
+
 for path in "${INSTALL_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/silo" "${CONFIG_DIR}/silo/artwork" "${CONFIG_DIR}/silo/postgres" "${SILO_WORK_DIR}" "${DATA_DIR}" "${MOUNT_DIR:-/mnt/remote}"; do
     [[ -e "${path}" ]] || continue
     printf '\n[%s]\n' "${path}"
@@ -29,6 +41,8 @@ for path in "${INSTALL_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/silo" "${CONFIG_DIR}
 done
 
 if command -v docker >/dev/null 2>&1; then
+    printf '\n[Container writable-layer sizes]\n'
+    docker ps -as --format 'table {{.Names}}\t{{.Size}}\t{{.Image}}' 2>/dev/null || true
     printf '\n[Docker usage]\n'
     docker system df 2>/dev/null || true
     printf '\n[Container logs]\n'
