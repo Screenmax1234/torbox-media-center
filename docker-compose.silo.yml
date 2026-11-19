@@ -32,6 +32,8 @@ services:
       - "${CONFIG_DIR}/silo:/config"
       # Match the absolute paths used by the existing Decypharr symlinks.
       - "${DATA_DIR}:/data:ro"
+      - "${DATA_DIR}/media:/data/media:ro"
+      - "${DATA_DIR}/downloads:/data/downloads:ro"
       - "${MOUNT_DIR}:/mnt/remote:ro,rslave"
       - "${SILO_WORK_DIR:-./silo-work}/transcode:/tmp/silo-transcode"
       - "${SILO_WORK_DIR:-./silo-work}/download-artifacts:/tmp/silo-download-artifacts"

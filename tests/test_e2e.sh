@@ -87,6 +87,12 @@ else
     fail "docker-compose.yml not found"
 fi
 
+if grep -q '\${DATA_DIR}/media:/data/media' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/downloads:/data/downloads' "$COMPOSE_FILE" && grep -q '\${DATA_DIR}/media:/data/media:ro' "$PROJECT_ROOT/docker-compose.silo.yml"; then
+    pass "Nested HDD media/download mounts are explicit for Docker containers"
+else
+    fail "Nested HDD media/download mounts are missing"
+fi
+
 if [[ -f "$NZBHYDRA_COMPOSE_FILE" ]] && grep -q 'lscr.io/linuxserver/nzbhydra2:latest' "$NZBHYDRA_COMPOSE_FILE" && grep -q 'NZBHYDRA_PORT:-5076}:5076' "$NZBHYDRA_COMPOSE_FILE"; then
     pass "NZBHydra2 overlay exists with the documented latest image and port"
 else

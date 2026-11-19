@@ -50,6 +50,10 @@ services:
       - "${CONFIG_DIR}/decypharr:/app"
       - "${MOUNT_DIR}:/mnt/remote:rshared"
       - "${DATA_DIR}:/data"
+      # Bind the Proxmox HDD mountpoints explicitly. Docker does not reliably
+      # propagate nested LXC mounts through a parent bind on every host.
+      - "${DATA_DIR}/media:/data/media"
+      - "${DATA_DIR}/downloads:/data/downloads"
     devices:
       - /dev/fuse:/dev/fuse:rwm
     cap_add:
@@ -199,6 +203,8 @@ services:
     volumes:
       - "${CONFIG_DIR}/radarr:/config"
       - "${DATA_DIR}:/data"
+      - "${DATA_DIR}/media:/data/media"
+      - "${DATA_DIR}/downloads:/data/downloads"
       - "${MOUNT_DIR}:/mnt/remote:rslave"
     deploy:
       resources:
@@ -244,6 +250,8 @@ services:
     volumes:
       - "${CONFIG_DIR}/sonarr:/config"
       - "${DATA_DIR}:/data"
+      - "${DATA_DIR}/media:/data/media"
+      - "${DATA_DIR}/downloads:/data/downloads"
       - "${MOUNT_DIR}:/mnt/remote:rslave"
     deploy:
       resources:
@@ -291,6 +299,8 @@ services:
     volumes:
       - "${CONFIG_DIR}/bazarr:/config"
       - "${DATA_DIR}:/data"
+      - "${DATA_DIR}/media:/data/media"
+      - "${DATA_DIR}/downloads:/data/downloads"
       - "${MOUNT_DIR}:/mnt/remote:rslave"
     deploy:
       resources:
@@ -377,6 +387,8 @@ services:
     volumes:
       - "${CONFIG_DIR}/plex:/config"
       - "${DATA_DIR}:/data"
+      - "${DATA_DIR}/media:/data/media:ro"
+      - "${DATA_DIR}/downloads:/data/downloads:ro"
       - "${MOUNT_DIR}:/mnt/remote:rslave"
     logging:
       driver: json-file
@@ -429,6 +441,8 @@ services:
     volumes:
       - "${CONFIG_DIR}/jellyfin:/config"
       - "${DATA_DIR}:/data"
+      - "${DATA_DIR}/media:/data/media:ro"
+      - "${DATA_DIR}/downloads:/data/downloads:ro"
       - "${MOUNT_DIR}:/mnt/remote:rslave"
     logging:
       driver: json-file
