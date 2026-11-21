@@ -71,3 +71,34 @@ with tempfile.TemporaryDirectory() as directory:
     assert config["services"]["plex"]["environment"]["PRESERVED_OVERRIDE"] == "yes"
     assert config["services"]["silo"]["devices"][0]["target"] == "/dev/dri"
     print("PASS: Compose discovers Silo and preserves the existing override through installed .env")
+
+    # Artwork-only migrations add another overlay, preserving the omnibus
+    # config/database bind, GPU mapping and the Decypharr temporary HDD bind.
+    artwork = {
+        "services": {
+            "silo": {"volumes": [{"type": "bind", "source": "/mnt/hdd/artwork/silo",
+                                   "target": "/config/silo/artwork", "bind": {"create_host_path": False}}]},
+            "radarr": {"volumes": [{"type": "bind", "source": "/mnt/hdd/artwork/radarr",
+                                     "target": "/config/MediaCover", "bind": {"create_host_path": False}}]},
+        }
+    }
+    (install / "docker-compose.artwork.yml").write_text(json.dumps(artwork))
+    dotenv = install / ".env"
+    dotenv.write_text(dotenv.read_text().replace(
+        "docker-compose.silo-gpu.yml\n", "docker-compose.silo-gpu.yml:docker-compose.artwork.yml\n"))
+    result = subprocess.run(COMMAND + ["--env-file", ".env", "config", "--format", "json"],
+                            cwd=install, env=env, text=True, capture_output=True, check=True)
+    services = json.loads(result.stdout)["services"]
+    silo_mounts = {v["target"]: v for v in services["silo"]["volumes"]}
+    radarr_mounts = {v["target"]: v for v in services["radarr"]["volumes"]}
+    assert silo_mounts["/config"]["source"] == env["CONFIG_DIR"] + "/silo"
+    assert silo_mounts["/config/silo/artwork"]["source"] == "/mnt/hdd/artwork/silo"
+    # Compose omits false values when serializing its canonical model.
+    assert not silo_mounts["/config/silo/artwork"]["bind"].get("create_host_path", False)
+    assert radarr_mounts["/config"]["source"] == env["CONFIG_DIR"] + "/radarr"
+    assert radarr_mounts["/config/MediaCover"]["source"] == "/mnt/hdd/artwork/radarr"
+    assert services["silo"]["devices"][0]["target"] == "/dev/dri"
+    assert services["plex"]["environment"]["PRESERVED_OVERRIDE"] == "yes"
+    decypharr_mounts = {v["target"]: v for v in services["decypharr"]["volumes"]}
+    assert decypharr_mounts["/tmp"]["source"] == env["DATA_DIR"] + "/downloads/decypharr-tmp"
+    print("PASS: artwork mounts preserve SSD databases, GPU devices and Decypharr's HDD temporary cache")

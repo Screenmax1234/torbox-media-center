@@ -37,6 +37,14 @@ case "${1:-}" in
         shift
         exec bash "${SCRIPT_DIR}/migrate-storage.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}" "${2:-${TORBOX_STORAGE_ROOT:-/data/torbox-system}}"
         ;;
+    --migrate-artwork)
+        shift
+        exec python3 "${SCRIPT_DIR}/lib/migrate_artwork.py" "$@"
+        ;;
+    --cleanup-artwork)
+        shift
+        exec python3 "${SCRIPT_DIR}/lib/migrate_artwork.py" --cleanup "$@"
+        ;;
     --add-silo-discovery)
         shift
         exec bash "${SCRIPT_DIR}/add-silo-discovery.sh" "${1:-${TORBOX_INSTALL_DIR:-$SCRIPT_DIR/torbox-media-server}}"
@@ -57,6 +65,8 @@ case "${1:-}" in
         echo "       bash setup-fixed.sh --remove-suggestarr [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --storage-report [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --migrate-storage [INSTALL_DIR] [TARGET_ROOT]"
+        echo "       bash setup-fixed.sh --migrate-artwork [INSTALL_DIR] [HDD_ARTWORK_DIR]"
+        echo "       bash setup-fixed.sh --cleanup-artwork [INSTALL_DIR]"
         echo "       bash setup-fixed.sh --add-silo-discovery [INSTALL_DIR]"
         echo "       ./setup-fixed.sh --refresh-management"
         echo ""

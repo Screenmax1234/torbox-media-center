@@ -551,10 +551,70 @@ that Silo, Radarr, Seerr, Bazarr and Listseerr work, then remove only the old
 copies reported by the script. Do not delete them while a service is still
 using the old path.
 
+#### Move artwork while keeping databases on the SSD
+
+For a growing library, use the narrower artwork migration instead of moving
+all configs. It moves Silo's `configs/silo/silo/artwork` and Radarr's
+`configs/radarr/MediaCover` to the HDD. Databases, credentials, media paths,
+Decypharr and GPU settings are preserved. Python 3, rsync, root access and
+Docker Compose v2 are required; on Debian install rsync with
+`apt-get install rsync` if it is missing.
+
+Run inside the media-server LXC, from the source checkout, when nobody is
+watching. Only Silo and Radarr are briefly stopped/recreated; images are not
+updated and Decypharr remains running:
+
+```bash
+cd /root/torbox-media-center
+git pull --ff-only
+bash setup-fixed.sh --migrate-artwork \
+  /root/torbox-media-center/torbox-media-server
+```
+
+The default target is `DATA_DIR/downloads/library-artwork`. This works with
+Proxmox's separate HDD bind mounts on `data/media` and `data/downloads` even
+when `/mnt/torbox-capacity` itself is not mounted inside the LXC. The command
+refuses a target on the install filesystem. To choose a different mounted
+HDD directory, pass it as a second argument. This is a copy of artwork only;
+it does not copy movies or Decypharr's temporary Usenet cache.
+
+The migration checks copies by checksum, preserves ownership, adds
+`docker-compose.artwork.yml` to the existing private `.env` Compose list,
+and verifies the running containers' mounts/readiness. Existing Compose
+overlays, including `/dev/dri`, stay in that list. The generated overlay is
+retained by repair and normal setup reruns; use the full Compose list (or
+`./manage.sh`) instead of specifying only `-f docker-compose.yml`.
+
+SSD originals are retained initially, so free space will not increase yet.
+Check that posters load in Silo and Radarr, then reclaim those verified SSD
+copies with:
+
+```bash
+bash setup-fixed.sh --cleanup-artwork \
+  /root/torbox-media-center/torbox-media-server
+df -h /
+```
+
+Cleanup verifies the HDD copies and live mounts again and deletes only the
+inactive SSD artwork contents. If files differ it stops without deleting
+anything. Migration failures retain the original artwork and attempt to
+restore the original `.env` and services; the private deployment backup path
+is reported on a restart failure. Before cleanup, a manual rollback is to
+stop only Silo/Radarr, restore `.env` from the reported
+`backup-before-artwork-*` directory and recreate those two services using the
+original Compose list. After cleanup, a rollback also requires copying the
+artwork back before restoring the original deployment. Keep the HDD mounted
+for normal operation; no media mount or database should be deleted.
+
+This relocates persistent artwork growth; it does not cap all disk use.
+Databases, application updates and logs still occupy some SSD space. Native
+Usenet can also use temporary HDD segment caches; the `/tmp` bind mount alone
+does not guarantee a cache size limit or automatic cleanup.
+
 If the report identifies Docker build cache or old images instead, review them
 with `docker system df`; remove only unused cache/images after confirming no
 active service depends on them. Transcode files should normally fall after
-playback ends; persistent growth under `configs/silo/artwork` or
+playback ends; persistent growth under `configs/silo/silo/artwork` or
 `configs/silo/postgres` is Silo metadata/cache growth and is safe to place on
 the HDD with the migration above.
 

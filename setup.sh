@@ -4301,6 +4301,12 @@ main() {
     # Parse command-line flags (moved to the very beginning)
     for arg in "$@"; do
         case "$arg" in
+            --migrate-artwork)
+                exec python3 "${SCRIPT_DIR}/lib/migrate_artwork.py" "${INSTALL_DIR}"
+                ;;
+            --cleanup-artwork)
+                exec python3 "${SCRIPT_DIR}/lib/migrate_artwork.py" --cleanup "${INSTALL_DIR}"
+                ;;
             --add-silo)
                 exec bash "${SCRIPT_DIR}/add-silo.sh" "${INSTALL_DIR}"
                 ;;
@@ -4337,6 +4343,8 @@ main() {
                 echo "Usage: ./setup.sh [OPTIONS]"
                 echo ""
                 echo "Options:"
+                echo "  --migrate-artwork            Move Silo/Radarr artwork to the HDD; keep databases on SSD"
+                echo "  --cleanup-artwork            Remove verified SSD originals after checking the migration"
                 echo "  --add-silo                   Add Silo to an existing running stack (/dev/dri by default)"
                 echo "  --add-nzbhydra               Add NZBHydra2 to an existing running stack (default port 5076)"
                 echo "  --add-suggestarr             Add SuggestArr recommendations to an existing running stack (default port 5000)"

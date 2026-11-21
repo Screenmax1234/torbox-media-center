@@ -28,12 +28,16 @@ if [[ -d /var/lib/docker ]]; then
     printf '\n[/var/lib/docker breakdown]\n'
     du -xhd2 /var/lib/docker 2>/dev/null | sort -h | tail -n 30 || true
 fi
+if [[ -d /var/lib/containerd ]]; then
+    printf '\n[/var/lib/containerd breakdown]\n'
+    du -xhd1 /var/lib/containerd 2>/dev/null | sort -h | tail -n 20 || true
+fi
 if command -v lsof >/dev/null 2>&1; then
     printf '\n[Deleted files still held open]\n'
     lsof +L1 2>/dev/null | tail -n +2 | head -n 30 || true
 fi
 
-for path in "${INSTALL_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/silo" "${CONFIG_DIR}/silo/artwork" "${CONFIG_DIR}/silo/postgres" "${SILO_WORK_DIR}" "${DATA_DIR}" "${MOUNT_DIR:-/mnt/remote}"; do
+for path in "${INSTALL_DIR}" "${CONFIG_DIR}" "${CONFIG_DIR}/silo" "${CONFIG_DIR}/silo/silo/artwork" "${CONFIG_DIR}/silo/postgres" "${CONFIG_DIR}/radarr/MediaCover" "${SILO_WORK_DIR}" "${DATA_DIR}" "${DATA_DIR}/downloads/library-artwork" "${MOUNT_DIR:-/mnt/remote}"; do
     [[ -e "${path}" ]] || continue
     printf '\n[%s]\n' "${path}"
     df -hT "${path}" 2>/dev/null || true

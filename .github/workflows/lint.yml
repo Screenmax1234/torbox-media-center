@@ -130,6 +130,11 @@ jobs:
       - name: Test authenticated service connections and repair
         run: python3 tests/test_connections.py
 
+      - name: Test HDD artwork migration and failure recovery
+        run: |
+          sudo apt-get update && sudo apt-get install -y rsync
+          python3 tests/test_artwork_migration.py
+
       - name: Extract and validate manage.sh
         run: |
           # Extract the heredoc content that generates manage.sh from setup.sh.
